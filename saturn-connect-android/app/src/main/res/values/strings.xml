@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Saturn Connect</string>
+    <string name="accessibility_service_description">Saturn Connect accessibility bridge for device control setup.</string>
+</resources>

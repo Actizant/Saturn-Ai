@@ -1,0 +1,187 @@
+name: Build Multi-Platform Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    name: Build Windows Setup (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Uninstaller & Saturn
+        run: |
+          pyinstaller --noconfirm installer/Uninstall.spec
+          pyinstaller --noconfirm installer/Saturn.spec
+          Copy-Item "dist/Uninstall.exe" -Destination "dist/Saturn/Uninstall.exe" -Force
+          Copy-Item "installer/uninstall.cmd" -Destination "dist/Saturn/uninstall.cmd" -Force
+          pyinstaller --noconfirm installer/Saturn_Setup.spec
+
+      - name: Upload Windows Setup Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Saturn-Windows-Setup
+          path: dist/Saturn_Setup.exe
+
+  build-macos:
+    name: Build macOS Application (.dmg)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build macOS App
+        run: |
+          pyinstaller --noconfirm \
+            --windowed \
+            --name "Saturn" \
+            --add-data "assets:assets" \
+            --add-data "config:config" \
+            --add-data "core:core" \
+            --add-data "actions:actions" \
+            --add-data "features:features" \
+            --add-data "smart_home:smart_home" \
+            --add-data "dashboard/static:dashboard/static" \
+            --add-data "workspace_store.py:." \
+            main.py
+
+      - name: Create DMG
+        run: |
+          npm install --global create-dmg || true
+          mkdir -p dmg_out
+          if command -v create-dmg &>/dev/null; then
+            create-dmg "dist/Saturn.app" dmg_out/ || true
+          fi
+          cd dist && zip -r "Saturn-macOS.zip" "Saturn.app"
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Saturn-macOS
+          path: dist/Saturn-macOS.zip
+
+  build-linux:
+    name: Build Linux Portable Binary
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx libegl1-mesa libxkbcommon-x11-0 libpulse0 libasound2-dev
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Linux Binary
+        run: |
+          pyinstaller --noconfirm \
+            --windowed \
+            --name "Saturn" \
+            --add-data "assets:assets" \
+            --add-data "config:config" \
+            --add-data "core:core" \
+            --add-data "actions:actions" \
+            --add-data "features:features" \
+            --add-data "smart_home:smart_home" \
+            --add-data "dashboard/static:dashboard/static" \
+            --add-data "workspace_store.py:." \
+            main.py
+          cd dist && tar -czvf "Saturn-Linux.tar.gz" "Saturn"
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Saturn-Linux
+          path: dist/Saturn-Linux.tar.gz
+
+  build-android:
+    name: Build Android APK (.apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform and build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      # Play Protect treats an APK signed with the generic debug key as an unknown
+      # developer - and an unknown developer that can drive the screen through an
+      # accessibility service is exactly what it blocks. With these four secrets set,
+      # the artifact installs as a normal app; without them the build still produces
+      # an installable APK, it just keeps the debug key.
+      - name: Write signing config from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SATURN_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.SATURN_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SATURN_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SATURN_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::No SATURN_KEYSTORE_BASE64 secret - the APK will carry the debug key and Play Protect will flag it."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/saturn-release.jks"
+          cat > saturn-connect-android/keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/saturn-release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Build release APK
+        working-directory: saturn-connect-android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SaturnConnect-Android
+          path: saturn-connect-android/app/build/outputs/apk/release/*.apk

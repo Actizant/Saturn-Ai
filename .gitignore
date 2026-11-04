@@ -1,0 +1,96 @@
+# Environments
+.venv/
+venv/
+ENV/
+env/
+# The validated app runtime lives beside the source and is 7.2 GB of packages.
+.venv312/
+.venv_lfm3/
+
+# llama.cpp runtime + GGUF model binaries (downloaded at setup, never committed)
+llama-cpp/
+llama-cpp-vulkan/
+models/gguf/
+_dl_*.zip
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Node dependencies & builds
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Installer build artifacts & large binaries (>100MB)
+installer/build_setup/
+installer/dist/
+installer/build/
+
+# Android build outputs & IDE
+tools/
+actions/android/
+saturn-connect-android/.gradle/
+saturn-connect-android/**/build/
+saturn-connect-android/local.properties
+saturn-connect-android/.idea/
+saturn-connect-android/.cxx/
+*.apk
+*.aab
+
+# Scratch & temporary logs
+scratch/
+*.log
+# The QML reference spike is 664 MB of PySide6 DLLs and one of them
+# (Qt6WebEngineCore.dll, 194 MB) sits above GitHub's hard 100 MB file limit, so
+# a stray `git add -A` would make the first push impossible to complete.
+# shots/ holds offscreen render probes and _design_inbox/ raw designer drops.
+experimental/
+shots/
+_design_inbox/
+aurum_live_*.txt
+.playwright-mcp/
+reengineered_apps/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+
+# Credentials & Sensitive Configurations
+# config/ is default-deny: everything inside it is ignored unless explicitly
+# allowlisted below, so any new runtime file (api keys, tokens, sessions,
+# caches) can never be caught by a stray `git add .`.
+.env
+.env.*
+*.env
+*spotify-config.json
+*.sqlite3
+config/*
+!config/__init__.py
+!config/mcp_servers.json
+!config/create_desktop_shortcut.ps1
+!config/*.example.json
+!config/models/
+!config/models/**
+
+# Personal Data & Local Runtime History
+memory/calendar_events.json
+memory/long_term.json
+memory/nutrition_log.json
+ig_session.json
+api_keys.json
+email_credentials.json
+discord_bot.json
+Saturn_Images/
+
+build/
+dist/
+actions/spotify_mcp_server/build/
+gradle-8.7-bin.zip
+setup_android_sdk.ps1
+build_apk.ps1
+process_logo.py

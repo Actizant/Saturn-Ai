@@ -1,0 +1,12 @@
+#!/bin/sh
+# Saturn secret tripwire - blocks commits that stage credentials or
+# non-allowlisted files under config/. Rules live in scripts/secret_tripwire.py.
+# Install once per clone:  cp scripts/git-hooks/pre-commit .git/hooks/pre-commit
+ROOT="$(git rev-parse --show-toplevel)"
+PY="$ROOT/.venv312/Scripts/python.exe"
+[ -f "$PY" ] || PY="$(command -v python || command -v python3 || command -v py)"
+if [ -z "$PY" ]; then
+    echo "secret-tripwire: no Python interpreter found; blocking commit." >&2
+    exit 1
+fi
+exec "$PY" "$ROOT/scripts/secret_tripwire.py" --staged

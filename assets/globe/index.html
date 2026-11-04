@@ -1,0 +1,2213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saturn Geospatial Globe // 3D Earth & Street Level Intelligence</title>
+    
+    <!-- Leaflet Street-Level Engine -->
+    <link rel="stylesheet" href="leaflet.css" />
+    <script src="leaflet.js"></script>
+
+    <!-- Three.js 3D Planetary Engine -->
+    <script src="three.min.js"></script>
+    <script src="OrbitControls.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #030712;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #f8fafc;
+        }
+
+        /* 3D Earth Container */
+        #globe3d-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+            z-index: 5;
+            transition: opacity 0.25s ease;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            will-change: transform;
+        }
+
+        #globe3d-container canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+            outline: none;
+        }
+
+        #globe3d-container:active {
+            cursor: grabbing;
+        }
+
+        /* Detailed Street Map Container */
+        #map2d-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 4;
+            display: none;
+            background: #030712;
+            transition: opacity 0.3s ease;
+        }
+
+        /* Leaflet Dark Customization */
+        .leaflet-container {
+            background-color: #030712 !important;
+            font-family: inherit;
+        }
+
+        .leaflet-bar a {
+            background-color: rgba(15, 23, 42, 0.95) !important;
+            color: #38bdf8 !important;
+            border-color: rgba(56, 189, 248, 0.3) !important;
+        }
+
+        .leaflet-bar a:hover {
+            background-color: rgba(56, 189, 248, 0.25) !important;
+            color: #ffffff !important;
+        }
+
+        .leaflet-control-attribution {
+            background: rgba(3, 7, 18, 0.8) !important;
+            color: #64748b !important;
+            font-size: 9px !important;
+        }
+
+        .leaflet-control-attribution a {
+            color: #38bdf8 !important;
+            text-decoration: none;
+        }
+
+        /* Ambient HUD Vignette */
+        .hud-vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: radial-gradient(circle at center, transparent 45%, rgba(3, 7, 18, 0.75) 100%);
+            box-shadow: inset 0 0 60px rgba(56, 189, 248, 0.08);
+            z-index: 10;
+        }
+
+        /* Top HUD Bar */
+        .hud-top-bar {
+            position: absolute;
+            top: 10px;
+            left: 12px;
+            right: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 25;
+            gap: 8px;
+        }
+
+        .hud-top-bar > * {
+            pointer-events: auto;
+        }
+
+        .hud-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(11, 19, 41, 0.94);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 20px;
+            padding: 5px 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+
+        .brand-dot {
+            width: 8px;
+            height: 8px;
+            background: #38bdf8;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #38bdf8;
+            animation: pulse-dot 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .brand-title {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            color: #bae6fd;
+            text-transform: uppercase;
+        }
+
+        .brand-badge {
+            background: rgba(56, 189, 248, 0.2);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 10px;
+            padding: 2px 7px;
+            font-size: 9px;
+            font-weight: 700;
+            color: #38bdf8;
+        }
+
+        /* Mode Switcher */
+        .mode-switcher {
+            display: flex;
+            background: rgba(11, 19, 41, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 3px;
+            gap: 3px;
+        }
+
+        .mode-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            padding: 4px 9px;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .mode-btn:hover {
+            color: #e2e8f0;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .mode-btn.active {
+            background: #0284c7;
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(2, 132, 199, 0.5);
+        }
+
+        .hud-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .hud-btn {
+            background: rgba(11, 19, 41, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #cbd5e1;
+            padding: 5px 11px;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .hud-btn:hover {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+        }
+
+        .hud-btn.close {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+        }
+
+        .hud-btn.close:hover {
+            background: rgba(239, 68, 68, 0.4);
+            color: #ffffff;
+        }
+
+        /* Route Telemetry HUD Card */
+        .route-card {
+            position: absolute;
+            bottom: 38px;
+            left: 12px;
+            right: 12px;
+            max-width: 440px;
+            background: rgba(11, 19, 41, 0.96);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 14px;
+            padding: 12px 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            z-index: 25;
+            display: none;
+            animation: slide-up 0.25s ease-out;
+        }
+
+        @keyframes slide-up {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .card-title {
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            color: #38bdf8;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .card-close {
+            background: transparent;
+            border: none;
+            color: #64748b;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .card-close:hover { color: #f87171; }
+
+        .route-endpoints {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .endpoint-box {
+            flex: 1;
+        }
+
+        .endpoint-box.right {
+            text-align: right;
+        }
+
+        .endpoint-city {
+            font-size: 13px;
+            font-weight: 700;
+            color: #f8fafc;
+        }
+
+        .endpoint-coords {
+            font-size: 9px;
+            color: #64748b;
+            font-family: monospace;
+        }
+
+        .route-plane-icon {
+            font-size: 14px;
+            color: #38bdf8;
+            padding: 0 10px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            background: rgba(3, 7, 18, 0.6);
+            border-radius: 8px;
+            padding: 6px 8px;
+        }
+
+        .metric-tile {
+            text-align: center;
+        }
+
+        .metric-label {
+            font-size: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            margin-bottom: 2px;
+        }
+
+        .metric-value {
+            font-size: 11px;
+            font-weight: 700;
+            color: #38bdf8;
+            font-family: monospace;
+        }
+
+        /* Location Card */
+        .location-card {
+            position: absolute;
+            top: 54px;
+            left: 12px;
+            background: rgba(11, 19, 41, 0.96);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 12px;
+            padding: 8px 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            z-index: 25;
+            display: none;
+            animation: slide-up 0.25s ease-out;
+            min-width: 180px;
+        }
+
+        .loc-title {
+            font-size: 12px;
+            font-weight: 800;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .loc-coords {
+            font-size: 9px;
+            color: #38bdf8;
+            font-family: monospace;
+            margin-top: 2px;
+        }
+
+        /* Bottom Status Bar */
+        .hud-status-bar {
+            position: absolute;
+            bottom: 8px;
+            left: 12px;
+            right: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: none;
+            z-index: 25;
+            font-size: 10px;
+            color: #64748b;
+            font-family: monospace;
+        }
+
+        .status-pill {
+            background: rgba(11, 19, 41, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 3px 8px;
+        }
+
+        .status-pill span.val {
+            color: #38bdf8;
+            font-weight: 600;
+        }
+
+        .status-fps {
+            color: #10b981 !important;
+        }
+
+        /* Custom Leaflet Pulsing Markers */
+        .custom-pin {
+            position: relative;
+            width: 14px;
+            height: 14px;
+        }
+        .custom-pin .pin-dot {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 8px;
+            height: 8px;
+            background: #38bdf8;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #38bdf8;
+        }
+        .custom-pin.dest .pin-dot {
+            background: #10b981;
+            box-shadow: 0 0 10px #10b981;
+        }
+        .custom-pin .pin-ring {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #38bdf8;
+            border-radius: 50%;
+            animation: ring-pulse 1.8s infinite ease-out;
+        }
+        .custom-pin.dest .pin-ring {
+            border-color: #10b981;
+        }
+        @keyframes ring-pulse {
+            0% { transform: scale(0.6); opacity: 1; }
+            100% { transform: scale(2.6); opacity: 0; }
+        }
+
+        .pin-popup-label {
+            background: rgba(15, 23, 42, 0.95) !important;
+            border: 1px solid rgba(56, 189, 248, 0.5) !important;
+            color: #bae6fd !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            border-radius: 8px !important;
+            padding: 3px 7px !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
+        }
+        .leaflet-popup-tip {
+            background: rgba(15, 23, 42, 0.95) !important;
+        }
+
+        /* Tactical Intelligence Sub-Bar */
+        .hud-sub-bar {
+            position: absolute;
+            top: 48px;
+            left: 12px;
+            display: flex;
+            gap: 6px;
+            z-index: 30;
+            pointer-events: auto;
+            flex-wrap: wrap;
+        }
+        .tactical-btn {
+            background: rgba(11, 19, 41, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #94a3b8;
+            padding: 3px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .tactical-btn:hover {
+            color: #bae6fd;
+            border-color: rgba(56, 189, 248, 0.4);
+            background: rgba(15, 23, 42, 0.96);
+        }
+        .tactical-btn.active {
+            color: #38bdf8;
+            border-color: #38bdf8;
+            background: rgba(2, 132, 199, 0.3);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+        }
+
+        /* Tactical Cards */
+        .intel-card {
+            position: absolute;
+            top: 86px;
+            right: 12px;
+            width: 280px;
+            max-height: 400px;
+            background: rgba(11, 19, 41, 0.96);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 16px;
+            padding: 12px;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+            z-index: 35;
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .intel-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .intel-item {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .intel-item:hover {
+            background: rgba(56, 189, 248, 0.15);
+            border-color: #38bdf8;
+        }
+        .mini-btn {
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            color: #38bdf8;
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 9px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .mini-btn:hover {
+            background: #0284c7;
+            color: #fff;
+        }
+        .weather-pill {
+            background: rgba(56, 189, 248, 0.18);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 8px;
+            padding: 1px 6px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #bae6fd;
+            margin-left: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .route-mode-bar {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 2px;
+            border-radius: 8px;
+        }
+        .route-type-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 10px;
+            padding: 4px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.15s ease;
+        }
+        .route-type-btn.active {
+            background: rgba(56, 189, 248, 0.25);
+            color: #38bdf8;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Planetary Earth Viewport -->
+    <div id="globe3d-container"></div>
+
+    <!-- 2D High-Resolution Street Level Viewport (Google Maps Style) -->
+    <div id="map2d-container"></div>
+
+    <!-- Ambient Vignette -->
+    <div class="hud-vignette"></div>
+
+    <!-- Top Navigation HUD -->
+    <div class="hud-top-bar">
+        <div class="hud-brand">
+            <div class="brand-dot"></div>
+            <div class="brand-title">SATURN MAPS</div>
+            <div class="brand-badge" id="view-badge">3D GLOBE</div>
+        </div>
+
+        <!-- Mode Switcher (Google Maps Globe Style) -->
+        <div class="mode-switcher">
+            <button class="mode-btn active" id="btn-mode-3d" onclick="switchMode('3D')">
+                <span>🌐</span> 3D Globe
+            </button>
+            <button class="mode-btn" id="btn-mode-street" onclick="switchMode('STREET')">
+                <span>🗺️</span> Street Map
+            </button>
+            <button class="mode-btn" id="btn-mode-sat" onclick="switchMode('SATELLITE')">
+                <span>🛰️</span> Satellite
+            </button>
+        </div>
+
+        <div class="hud-actions">
+            <button class="hud-btn" id="btn-spin" onclick="toggleSpin()">
+                <span>⏸</span> Pause
+            </button>
+            <button class="hud-btn" onclick="resetView()">
+                <span>🧭</span> Reset
+            </button>
+            <button class="hud-btn close" onclick="requestClose()">
+                <span>✕</span>
+            </button>
+        </div>
+    </div>
+
+
+    <!-- Pinned Location HUD Card -->
+    <div class="location-card" id="location-card">
+        <div class="loc-title">
+            <span style="color:#38bdf8;">📍</span>
+            <span id="loc-card-name">Location</span>
+            <span id="loc-weather-pill" class="weather-pill" style="display:none;">
+                <span id="weather-icon">⛅</span> <span id="weather-temp">--°C</span>
+            </span>
+        </div>
+        <div class="loc-coords" id="loc-card-coords">0.0° N, 0.0° E</div>
+        <div id="loc-weather-details" style="display:none; font-size:9px; color:#94a3b8; margin-top:3px;">
+            Humidity: <span id="weather-hum">--</span>% | Wind: <span id="weather-wind">--</span> km/h | <span id="weather-cond">Fair</span>
+        </div>
+    </div>
+
+    <!-- ISS Space Station Orbit Card -->
+    <div class="intel-card" id="iss-card" style="display:none;">
+        <div class="card-header">
+            <div class="card-title"><span>🛰️</span> ISS SPACE STATION TELEMETRY</div>
+            <button class="card-close" onclick="closeIssCard()">✕</button>
+        </div>
+        <div class="metrics-grid">
+            <div class="metric-tile">
+                <div class="metric-label">Velocity</div>
+                <div class="metric-value" id="iss-velocity">---</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-label">Altitude</div>
+                <div class="metric-value" id="iss-altitude">---</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-label">Latitude</div>
+                <div class="metric-value" id="iss-lat">---</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-label">Longitude</div>
+                <div class="metric-value" id="iss-lon">---</div>
+            </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+            <span style="font-size:9px; color:#64748b;" id="iss-status">🛰️ Live Tracking Active</span>
+            <button class="mini-btn" onclick="centerIss()">Center View</button>
+        </div>
+    </div>
+
+    <!-- Earthquake Activity Card -->
+    <div class="intel-card" id="earthquake-card" style="display:none;">
+        <div class="card-header">
+            <div class="card-title"><span>⚡</span> USGS GLOBAL SEISMIC NETWORK</div>
+            <button class="card-close" onclick="closeEarthquakeCard()">✕</button>
+        </div>
+        <div id="earthquake-summary" style="font-size:10px; color:#bae6fd; margin-bottom:4px;">
+            Fetching global seismic activity...
+        </div>
+        <div class="intel-list" id="earthquake-list"></div>
+    </div>
+
+    <!-- Nearby POI Card -->
+    <div class="intel-card" id="poi-card" style="display:none;">
+        <div class="card-header">
+            <div class="card-title"><span>📍</span> TACTICAL POI RADAR</div>
+            <button class="card-close" onclick="closePoiCard()">✕</button>
+        </div>
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <input type="text" id="poi-search-input" placeholder="Search hospitals, food, fuel..." style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:4px 8px; color:#fff; font-size:10px; flex:1;" onkeydown="if(event.key==='Enter') searchPoi()">
+            <button class="mini-btn" onclick="searchPoi()">Scan</button>
+        </div>
+        <div class="intel-list" id="poi-list"></div>
+    </div>
+
+    <!-- Route Telemetry HUD Card -->
+    <div class="route-card" id="route-card">
+        <div class="card-header">
+            <div class="card-title" id="route-card-title">
+                <span>⚡</span> ROUTE TELEMETRY
+            </div>
+            <button class="card-close" onclick="hideRouteCard()">✕</button>
+        </div>
+
+        <div class="route-mode-bar">
+            <button class="route-type-btn active" id="btn-route-flight" onclick="switchRouteType('flight')">✈️ Flight Arc</button>
+            <button class="route-type-btn" id="btn-route-driving" onclick="switchRouteType('driving')">🚗 Highway Road</button>
+        </div>
+
+        <div class="route-endpoints">
+            <div class="endpoint-box">
+                <div class="endpoint-city" id="origin-city">Origin</div>
+                <div class="endpoint-coords" id="origin-coords">0.0°, 0.0°</div>
+            </div>
+
+            <div class="route-plane-icon" id="route-icon">✈</div>
+
+            <div class="endpoint-box right">
+                <div class="endpoint-city" id="dest-city">Destination</div>
+                <div class="endpoint-coords" id="dest-coords">0.0°, 0.0°</div>
+            </div>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-tile">
+                <div class="metric-label" id="metric-dist-label">Distance</div>
+                <div class="metric-value" id="route-dist-km">---</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-label" id="metric-sub-label">Mode / Units</div>
+                <div class="metric-value" id="route-dist-nm">---</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-label">Est. Time</div>
+                <div class="metric-value" id="route-flight-time">---</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-label" id="metric-bearing-label">Bearing</div>
+                <div class="metric-value" id="route-bearing">---</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Status Bar -->
+    <div class="hud-status-bar">
+        <div class="status-pill">
+            Center: <span class="val" id="status-coords">20.6° N, 78.9° E</span>
+        </div>
+        <div class="status-pill" id="status-zoom-pill">
+            Zoom / View: <span class="val" id="status-zoom">Planetary</span>
+        </div>
+        <div class="status-pill" id="status-flights-pill" style="display:none;">
+            Live Flights: <span class="val" id="status-flights-count">0</span>
+        </div>
+        <div class="status-pill">
+            Engine: <span class="val status-fps" id="status-fps-val">180 FPS // DIRECT3D 11</span>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // DUAL HYBRID GLOBE & STREET-LEVEL ENGINE
+        // ==========================================
+        let currentMode = "3D"; // "3D", "STREET", "SATELLITE"
+        const GLOBE_RADIUS = 100;
+
+        // Three.js 3D Objects
+        let scene, camera, renderer, controls;
+        let earthMesh, atmosphereMesh;
+        let routeCurveMesh = null, pulseParticle = null;
+        let originMarker = null, destMarker = null, locationMarker = null;
+        let flightGroup = null;
+        let flightGeometry = null, flightMaterial = null;
+        let autoSpin = true;
+        let isCamAnimating = false;
+        let isUserDragging = false;
+        let dragEndTimeout = null;
+        let camTarget = null;
+        let targetOrbitDist = 220;
+        let pulseProgress = 0;
+        let lastHudUpdate = 0;
+        let elStatusCoords = null;
+        let elStatusZoom = null;
+        let lastFrameTime = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+        let fpsFrames = 0;
+        let fpsLastTime = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+        let elStatusFps = null;
+        let isPaused = false;
+        let animFrameId = null;
+        const _camDirVec = new THREE.Vector3();
+        const _pulseVec = new THREE.Vector3();
+        const _flyCurDir = new THREE.Vector3();
+        const _flyTgtDir = new THREE.Vector3();
+        const _flyRotQ = new THREE.Quaternion();
+        const _flyIdentityQ = new THREE.Quaternion();
+        const _flyStepQ = new THREE.Quaternion();
+
+        // Leaflet 2D High-Resolution Objects
+        let map2D = null;
+        let tileLayerStreet = null;
+        let tileLayerSat = null;
+        let routePolyline2D = null;
+        let originMarker2D = null;
+        let destMarker2D = null;
+        let locationMarker2D = null;
+        let flightLayer2D = null;
+        let radarLayer = null;
+        let nightPolygon2D = null;
+        let issLayer = null;
+        let earthquakeLayer = null;
+        let poiLayer = null;
+        let drivingRouteLayer = null;
+        let issMarker3D = null;
+        let earthquake3DGroup = null;
+        let currentRouteMode = "flight";
+
+        let activeRouteData = null;
+        let activeLocationData = null;
+        let activeFlights = [];
+
+        // ==========================================
+        // 1. THREE.JS 3D EARTH INITIALIZATION
+        // ==========================================
+        function init3DGlobe() {
+            const container = document.getElementById('globe3d-container');
+            const w = container.clientWidth || window.innerWidth;
+            const h = container.clientHeight || window.innerHeight;
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x030712);
+
+            camera = new THREE.PerspectiveCamera(45, w / h, 1, 1500);
+            camera.position.set(0, 40, 240);
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: false,
+                alpha: false,
+                powerPreference: "high-performance",
+                precision: "mediump",
+                stencil: false,
+                depth: true,
+                failIfMajorPerformanceCaveat: false
+            });
+            renderer.setSize(w, h);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.14;
+            controls.rotateSpeed = 1.25;
+            controls.zoomSpeed = 1.3;
+            controls.enablePan = false;
+            controls.minDistance = 102; // Close surface approach
+            controls.maxDistance = 420;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 2.0;
+            controls.addEventListener('start', () => {
+                isUserDragging = true;
+                if (dragEndTimeout) {
+                    clearTimeout(dragEndTimeout);
+                    dragEndTimeout = null;
+                }
+            });
+            controls.addEventListener('end', () => {
+                if (dragEndTimeout) clearTimeout(dragEndTimeout);
+                dragEndTimeout = setTimeout(() => {
+                    isUserDragging = false;
+                    dragEndTimeout = null;
+                }, 1800);
+            });
+
+            const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+            scene.add(ambient);
+
+            // Load optimized 2K Earth texture with fallback (disable mipmap generation for instant zero-lag upload)
+            const texLoader = new THREE.TextureLoader();
+            const earthTex = texLoader.load('earth-night-2k.jpg', (tex) => {
+                tex.generateMipmaps = false;
+                tex.minFilter = THREE.LinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                if (earthMat) earthMat.needsUpdate = true;
+                renderer.render(scene, camera);
+            }, undefined, () => {
+                const fallbackTex = texLoader.load('earth-night.jpg', (fTex) => {
+                    fTex.generateMipmaps = false;
+                    fTex.minFilter = THREE.LinearFilter;
+                    fTex.magFilter = THREE.LinearFilter;
+                    if (earthMat) {
+                        earthMat.map = fTex;
+                        earthMat.needsUpdate = true;
+                    }
+                    renderer.render(scene, camera);
+                });
+                if (earthMat) {
+                    earthMat.map = fallbackTex;
+                    earthMat.needsUpdate = true;
+                }
+            });
+            earthTex.generateMipmaps = false;
+            earthTex.minFilter = THREE.LinearFilter;
+            earthTex.magFilter = THREE.LinearFilter;
+
+            const earthGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 32, 32);
+            const earthMat = new THREE.MeshBasicMaterial({ map: earthTex });
+            earthMesh = new THREE.Mesh(earthGeo, earthMat);
+            scene.add(earthMesh);
+
+            // Atmosphere Glow
+            const atmoGeo = new THREE.SphereGeometry(GLOBE_RADIUS * 1.018, 32, 32);
+            const atmoMat = new THREE.MeshBasicMaterial({
+                color: 0x38bdf8,
+                transparent: true,
+                opacity: 0.12,
+                side: THREE.BackSide,
+                depthWrite: false
+            });
+            atmosphereMesh = new THREE.Mesh(atmoGeo, atmoMat);
+            scene.add(atmosphereMesh);
+
+            flightGroup = new THREE.Group();
+            scene.add(flightGroup);
+            flightGeometry = new THREE.ConeGeometry(1.0, 3.0, 6);
+            flightGeometry.rotateX(Math.PI / 2);
+            flightMaterial = new THREE.MeshBasicMaterial({ color: 0x10b981 });
+
+            // Default focus on India
+            flyTo(20.5937, 78.9629, 230);
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        // ==========================================
+        // 2. LEAFLET HIGH-PRECISION STREET MAP INIT
+        // ==========================================
+        function init2DMap() {
+            if (map2D) return;
+
+            map2D = L.map('map2d-container', {
+                center: [20.5937, 78.9629],
+                zoom: 5,
+                minZoom: 2,
+                maxZoom: 18,
+                preferCanvas: true,
+                zoomControl: true,
+                attributionControl: false
+            });
+
+            // Fast, dark, high-contrast CartoDB Dark Matter tiles (Cloudflare Edge CDN, street precision)
+            const CARTO_API_KEY = "cb1_3xgr_1_35c1dc6a9a9b23cb25386cb6";
+            const cartoUrl = CARTO_API_KEY 
+                ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_API_KEY}&v=2`
+                : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+            tileLayerStreet = L.tileLayer(cartoUrl, {
+                subdomains: 'abcd',
+                maxZoom: 20
+            }).addTo(map2D);
+            window.tileLayerStreet = tileLayerStreet;
+            window.map2D = map2D;
+
+            // Satellite imagery tiles (Esri World Imagery)
+            tileLayerSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 18
+            });
+
+            flightLayer2D = L.layerGroup().addTo(map2D);
+            issLayer = L.layerGroup().addTo(map2D);
+            earthquakeLayer = L.layerGroup().addTo(map2D);
+            poiLayer = L.layerGroup().addTo(map2D);
+            drivingRouteLayer = L.layerGroup().addTo(map2D);
+
+            map2D.on('move', () => {
+                const c = map2D.getCenter();
+                const latStr = `${Math.abs(c.lat).toFixed(2)}° ${c.lat >= 0 ? 'N' : 'S'}`;
+                const lonStr = `${Math.abs(c.lng).toFixed(2)}° ${c.lng >= 0 ? 'E' : 'W'}`;
+                document.getElementById('status-coords').innerText = `${latStr}, ${lonStr}`;
+                document.getElementById('status-zoom').innerText = `Zoom ${map2D.getZoom()} (Street Precision)`;
+            });
+
+            // Google Maps Globe style: zooming out to space pulls back to 3D Globe
+            map2D.on('zoomend', () => {
+                if (map2D.getZoom() <= 2 && currentMode !== "3D") {
+                    switchMode("3D");
+                }
+            });
+        }
+
+        // ==========================================
+        // 3. GOOGLE MAPS GLOBE MODE SWITCHER
+        // ==========================================
+        function switchMode(mode) {
+            currentMode = mode;
+
+            const btn3D = document.getElementById('btn-mode-3d');
+            const btnStreet = document.getElementById('btn-mode-street');
+            const btnSat = document.getElementById('btn-mode-sat');
+            const globeDiv = document.getElementById('globe3d-container');
+            const mapDiv = document.getElementById('map2d-container');
+            const badge = document.getElementById('view-badge');
+            const zoomPill = document.getElementById('status-zoom');
+
+            btn3D.classList.toggle('active', mode === "3D");
+            btnStreet.classList.toggle('active', mode === "STREET");
+            btnSat.classList.toggle('active', mode === "SATELLITE");
+
+            if (mode === "3D") {
+                globeDiv.style.display = 'block';
+                mapDiv.style.display = 'none';
+                badge.innerText = "3D GLOBE";
+                zoomPill.innerText = "Planetary Orbit";
+                controls.update();
+            } else {
+                globeDiv.style.display = 'none';
+                mapDiv.style.display = 'block';
+
+                init2DMap();
+                setTimeout(() => { if (map2D) map2D.invalidateSize(); }, 50);
+
+                if (mode === "STREET") {
+                    if (map2D.hasLayer(tileLayerSat)) map2D.removeLayer(tileLayerSat);
+                    if (!map2D.hasLayer(tileLayerStreet)) tileLayerStreet.addTo(map2D);
+                    badge.innerText = "STREET MAP";
+                } else if (mode === "SATELLITE") {
+                    if (map2D.hasLayer(tileLayerStreet)) map2D.removeLayer(tileLayerStreet);
+                    if (!map2D.hasLayer(tileLayerSat)) tileLayerSat.addTo(map2D);
+                    badge.innerText = "SATELLITE";
+                }
+
+                // Sync current camera focus to 2D
+                if (activeRouteData) {
+                    renderRoute2D(activeRouteData);
+                } else if (activeLocationData) {
+                    renderLocation2D(activeLocationData);
+                } else {
+                    const c = getCameraLatLon();
+                    map2D.setView([c.lat, c.lon], 6);
+                }
+            }
+        }
+
+        function latLonToVector3(lat, lon, r) {
+            const phi = (90 - lat) * (Math.PI / 180);
+            const theta = (lon + 180) * (Math.PI / 180);
+            const x = -(r * Math.sin(phi) * Math.cos(theta));
+            const z = r * Math.sin(phi) * Math.sin(theta);
+            const y = r * Math.cos(phi);
+            return new THREE.Vector3(x, y, z);
+        }
+
+        function getCameraLatLon() {
+            camera.getWorldDirection(_camDirVec).negate();
+            const phi = Math.acos(Math.max(-1, Math.min(1, _camDirVec.y)));
+            const theta = Math.atan2(_camDirVec.z, -_camDirVec.x);
+            let lat = 90 - (phi * 180 / Math.PI);
+            let lon = ((theta * 180 / Math.PI) - 180);
+            if (lon < -180) lon += 360;
+            if (lon > 180) lon -= 360;
+            return { lat: lat, lon: lon };
+        }
+
+        // ==========================================
+        // 4. ANIMATION LOOP & AUTO-TRANSITION
+        // ==========================================
+        const GLOBE_TARGET_FPS = 60;
+        const GLOBE_FRAME_INTERVAL = 1000 / GLOBE_TARGET_FPS;
+        let lastGlobeRenderTime = 0;
+
+        function animate(now = performance.now()) {
+            if (isPaused) return;
+            animFrameId = requestAnimationFrame(animate);
+
+            if (currentMode !== "3D") return;
+
+            const elapsed = now - lastGlobeRenderTime;
+            if (elapsed < GLOBE_FRAME_INTERVAL) {
+                return;
+            }
+            lastGlobeRenderTime = now - (elapsed % GLOBE_FRAME_INTERVAL);
+
+            const dt = Math.min(Math.max((now - lastFrameTime) / 1000, 0.0005), 0.05);
+            lastFrameTime = now;
+            const dtScale = dt * 60; // 1.0 at 60fps, 0.333 at 180fps
+
+            if (isCamAnimating && camTarget) {
+                const curLen = camera.position.length();
+                _flyCurDir.copy(camera.position).normalize();
+                _flyTgtDir.copy(camTarget).normalize();
+                const slerpFactor = 1.0 - Math.pow(Math.max(0.0001, 1.0 - 0.08), dtScale);
+
+                if (_flyCurDir.dot(_flyTgtDir) > 0.9999) {
+                    const newDist = THREE.MathUtils.lerp(curLen, targetOrbitDist, slerpFactor);
+                    camera.position.setLength(newDist);
+                } else {
+                    _flyRotQ.setFromUnitVectors(_flyCurDir, _flyTgtDir);
+                    _flyStepQ.copy(_flyIdentityQ).slerp(_flyRotQ, slerpFactor);
+                    camera.position.applyQuaternion(_flyStepQ);
+                    const newDist = THREE.MathUtils.lerp(curLen, targetOrbitDist, slerpFactor);
+                    camera.position.setLength(Math.max(115, newDist));
+                }
+
+                controls.target.set(0, 0, 0);
+                if (camera.position.distanceTo(camTarget) < 1.5) {
+                    camera.position.copy(camTarget);
+                    isCamAnimating = false;
+                    camTarget = null;
+                }
+            }
+
+            controls.autoRotate = autoSpin && !isCamAnimating && !isUserDragging;
+            controls.update(dt);
+
+            // Google Maps Globe style: zooming very close into surface auto-transitions to Street Map!
+            const dist = camera.position.length();
+            if (dist < 108 && !isCamAnimating) {
+                switchMode("STREET");
+                return;
+            }
+
+            // Animate Route Pulse Photon (Zero-allocation, frame-rate independent)
+            if (pulseParticle && pulseParticle.curve) {
+                pulseProgress = (pulseProgress + 0.48 * dt) % 1.0;
+                pulseParticle.curve.getPoint(pulseProgress, _pulseVec);
+                pulseParticle.position.copy(_pulseVec);
+            }
+
+            // Animate Markers
+            const t = now * 0.005;
+            if (originMarker) {
+                const s = 1.0 + 0.2 * Math.sin(t);
+                originMarker.scale.set(s, s, s);
+            }
+            if (destMarker) {
+                const s = 1.0 + 0.2 * Math.cos(t);
+                destMarker.scale.set(s, s, s);
+            }
+            if (locationMarker) {
+                const s = 1.0 + 0.25 * Math.sin(t * 1.5);
+                locationMarker.scale.set(s, s, s);
+            }
+
+            // Real-time High Refresh FPS Telemetry
+            fpsFrames++;
+            if (now - fpsLastTime >= 400) {
+                const measuredFps = Math.round((fpsFrames * 1000) / (now - fpsLastTime));
+                fpsFrames = 0;
+                fpsLastTime = now;
+                if (!elStatusFps) elStatusFps = document.getElementById('status-fps-val');
+                if (elStatusFps) {
+                    elStatusFps.innerText = `${measuredFps} FPS // DIRECT3D 11`;
+                }
+            }
+
+            if (now - lastHudUpdate >= 250) {
+                if (!elStatusCoords) elStatusCoords = document.getElementById('status-coords');
+                if (!elStatusZoom) elStatusZoom = document.getElementById('status-zoom');
+                const c = getCameraLatLon();
+                const latStr = `${Math.abs(c.lat).toFixed(1)}° ${c.lat >= 0 ? 'N' : 'S'}`;
+                const lonStr = `${Math.abs(c.lon).toFixed(1)}° ${c.lon >= 0 ? 'E' : 'W'}`;
+                if (elStatusCoords) elStatusCoords.innerText = `${latStr}, ${lonStr}`;
+                if (elStatusZoom) elStatusZoom.innerText = `Altitude ~${Math.round((dist - 100) * 64)} km`;
+                lastHudUpdate = now;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function pauseGlobe() {
+            isPaused = true;
+            if (animFrameId) {
+                cancelAnimationFrame(animFrameId);
+                animFrameId = null;
+            }
+        }
+
+        function resumeGlobe() {
+            if (!isPaused) return;
+            isPaused = false;
+            lastFrameTime = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+            lastGlobeRenderTime = lastFrameTime;
+            fpsLastTime = lastFrameTime;
+            fpsFrames = 0;
+            if (!animFrameId) {
+                animFrameId = requestAnimationFrame(animate);
+            }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                pauseGlobe();
+            } else {
+                resumeGlobe();
+            }
+        });
+
+        function flyTo(lat, lon, dist = 220) {
+            autoSpin = false;
+            document.getElementById('btn-spin').innerHTML = '<span>▶</span> Spin';
+            targetOrbitDist = dist || 220;
+            const v = latLonToVector3(lat, lon, targetOrbitDist);
+            camTarget = v;
+            isCamAnimating = true;
+        }
+
+        // ==========================================
+        // 5. LOCATION PINNING (3D & STREET-LEVEL)
+        // ==========================================
+        function showLocation(data) {
+            activeLocationData = data;
+            const lat = parseFloat(data.lat || 0);
+            const lon = parseFloat(data.lon || 0);
+            const name = data.name || (data.label ? data.label.split(',')[0] : 'Location');
+            const label = data.label || name;
+
+            // Render on 3D Globe
+            renderLocation3D(lat, lon, label);
+
+            // Render on 2D Street Map
+            renderLocation2D(data);
+
+            // Update Location Card
+            const card = document.getElementById('location-card');
+            document.getElementById('loc-card-name').innerText = label;
+            const latStr = `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'}`;
+            const lonStr = `${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}`;
+            document.getElementById('loc-card-coords').innerText = `${latStr}, ${lonStr}`;
+
+            if (data.weather) {
+                const w = data.weather;
+                document.getElementById('weather-icon').innerText = w.icon || '⛅';
+                document.getElementById('weather-temp').innerText = `${w.temperature_c}°C`;
+                document.getElementById('loc-weather-pill').style.display = 'inline-flex';
+                document.getElementById('weather-hum').innerText = w.humidity;
+                document.getElementById('weather-wind').innerText = w.wind_kmh;
+                document.getElementById('weather-cond').innerText = w.condition;
+                document.getElementById('loc-weather-details').style.display = 'block';
+            } else {
+                fetchWeatherForLocation(lat, lon);
+            }
+
+            card.style.display = 'block';
+
+            // Auto-switch to Street Map if detailed zoom requested
+            if (data.zoom && data.zoom >= 7) {
+                switchMode("STREET");
+            }
+        }
+
+        function renderLocation3D(lat, lon, label) {
+            flyTo(lat, lon, 180);
+
+            if (locationMarker) scene.remove(locationMarker);
+            const pinGeo = new THREE.RingGeometry(0.3, 1.0, 20);
+            const pinMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide });
+            locationMarker = new THREE.Mesh(pinGeo, pinMat);
+            const pos = latLonToVector3(lat, lon, GLOBE_RADIUS + 0.5);
+            locationMarker.position.copy(pos);
+            locationMarker.lookAt(pos.clone().multiplyScalar(2));
+            scene.add(locationMarker);
+        }
+
+        function renderLocation2D(data) {
+            init2DMap();
+            if (locationMarker2D) map2D.removeLayer(locationMarker2D);
+
+            const lat = parseFloat(data.lat || 0);
+            const lon = parseFloat(data.lon || 0);
+            const label = data.label || data.name || 'Location';
+            const zoom = data.zoom || 11;
+
+            const icon = L.divIcon({
+                className: 'custom-pin',
+                html: '<div class="pin-ring"></div><div class="pin-dot"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+
+            locationMarker2D = L.marker([lat, lon], { icon: icon }).addTo(map2D);
+            locationMarker2D.bindPopup(`<span class="pin-popup-label">📍 ${label}</span>`, {
+                className: 'city-label-popup',
+                offset: [0, -8]
+            }).openPopup();
+
+            map2D.setView([lat, lon], zoom);
+        }
+
+        // ==========================================
+        // 6. ROUTE RENDERING (GOOGLE MAPS GLOBE STYLE)
+        // ==========================================
+        function showRoute(origLat, origLon, destLat, destLon, meta) {
+            activeRouteData = {
+                origLat: parseFloat(origLat),
+                origLon: parseFloat(origLon),
+                destLat: parseFloat(destLat),
+                destLon: parseFloat(destLon),
+                meta: meta
+            };
+
+            const distKm = meta.distance_km || 0;
+
+            // Render on 3D Earth (with dynamic marker sizing)
+            renderRoute3D(activeRouteData);
+
+            // Render on 2D Street Map (with exact road/district coordinates)
+            renderRoute2D(activeRouteData);
+
+            // Update Telemetry Card
+            const card = document.getElementById('route-card');
+            document.getElementById('origin-city').innerText = meta.originName || 'Origin';
+            document.getElementById('origin-coords').innerText = `${activeRouteData.origLat.toFixed(2)}°, ${activeRouteData.origLon.toFixed(2)}°`;
+            document.getElementById('dest-city').innerText = meta.destName || 'Destination';
+            document.getElementById('dest-coords').innerText = `${activeRouteData.destLat.toFixed(2)}°, ${activeRouteData.destLon.toFixed(2)}°`;
+
+            document.getElementById('route-dist-km').innerText = meta.distance_km ? `${meta.distance_km.toLocaleString()} km` : '---';
+            document.getElementById('route-dist-nm').innerText = meta.distance_nm ? `${meta.distance_nm.toLocaleString()} NM` : '---';
+            document.getElementById('route-flight-time').innerText = meta.flight_time || '---';
+            document.getElementById('route-bearing').innerText = meta.bearing ? `${meta.bearing}°` : '---';
+            card.style.display = 'block';
+
+            // Google Maps Globe Logic:
+            // For short-distance regional routes (like Mumbai to Kalyan, 32 km),
+            // auto-switch to Detailed Street Map so both cities and exact roads are fully detailed!
+            // For long-distance intercontinental routes (> 800 km), stay on 3D Earth Globe!
+            if (distKm > 0 && distKm < 800) {
+                switchMode("STREET");
+            } else {
+                switchMode("3D");
+            }
+        }
+
+        function renderRoute3D(data) {
+            clearRoute3D();
+
+            const lat1 = data.origLat;
+            const lon1 = data.origLon;
+            const lat2 = data.destLat;
+            const lon2 = data.destLon;
+
+            const v1 = latLonToVector3(lat1, lon1, GLOBE_RADIUS);
+            const v2 = latLonToVector3(lat2, lon2, GLOBE_RADIUS);
+            const dist = v1.distanceTo(v2);
+
+            // DYNAMIC MARKER SIZING:
+            // Scale ring markers based on distance so close cities NEVER overlap into a giant blob!
+            const markerR = Math.max(0.15, Math.min(1.2, dist * 0.05));
+
+            const mid = v1.clone().add(v2).multiplyScalar(0.5);
+            mid.normalize().multiplyScalar(GLOBE_RADIUS + Math.min(60, dist * 0.2));
+
+            const curve = new THREE.QuadraticBezierCurve3(v1, mid, v2);
+            const pts = curve.getPoints(50);
+
+            const routeGeo = new THREE.BufferGeometry().setFromPoints(pts);
+            const routeMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, linewidth: 2 });
+            routeCurveMesh = new THREE.Line(routeGeo, routeMat);
+            scene.add(routeCurveMesh);
+
+            // Pulse Photon
+            const pulseGeo = new THREE.SphereGeometry(Math.max(0.3, Math.min(1.5, markerR * 0.8)), 10, 10);
+            const pulseMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            pulseParticle = new THREE.Mesh(pulseGeo, pulseMat);
+            pulseParticle.curve = curve;
+            scene.add(pulseParticle);
+
+            // Scaled Origin Pin
+            const ringGeo = new THREE.RingGeometry(markerR * 0.4, markerR, 18);
+            const origMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide });
+            originMarker = new THREE.Mesh(ringGeo, origMat);
+            originMarker.position.copy(v1.clone().multiplyScalar(1.004));
+            originMarker.lookAt(v1.clone().multiplyScalar(2));
+            scene.add(originMarker);
+
+            // Scaled Destination Pin
+            const destMat = new THREE.MeshBasicMaterial({ color: 0x10b981, side: THREE.DoubleSide });
+            destMarker = new THREE.Mesh(ringGeo, destMat);
+            destMarker.position.copy(v2.clone().multiplyScalar(1.004));
+            destMarker.lookAt(v2.clone().multiplyScalar(2));
+            scene.add(destMarker);
+
+            // Center Camera on Route
+            const midLat = (lat1 + lat2) / 2;
+            const midLon = (lon1 + lon2) / 2;
+            flyTo(midLat, midLon, Math.max(125, Math.min(320, GLOBE_RADIUS + dist * 1.4)));
+        }
+
+        function renderRoute2D(data) {
+            init2DMap();
+
+            if (routePolyline2D) map2D.removeLayer(routePolyline2D);
+            if (originMarker2D) map2D.removeLayer(originMarker2D);
+            if (destMarker2D) map2D.removeLayer(destMarker2D);
+
+            const lat1 = data.origLat;
+            const lon1 = data.origLon;
+            const lat2 = data.destLat;
+            const lon2 = data.destLon;
+            const meta = data.meta || {};
+
+            // Precise Glowing Route Polyline
+            routePolyline2D = L.polyline([[lat1, lon1], [lat2, lon2]], {
+                color: '#38bdf8',
+                weight: 3.5,
+                opacity: 0.9,
+                dashArray: '8, 6'
+            }).addTo(map2D);
+
+            // Origin Marker (Cyan)
+            const iconOrig = L.divIcon({
+                className: 'custom-pin',
+                html: '<div class="pin-ring"></div><div class="pin-dot"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+            originMarker2D = L.marker([lat1, lon1], { icon: iconOrig }).addTo(map2D);
+            originMarker2D.bindPopup(`<span class="pin-popup-label">📍 ${meta.originName || 'Origin'}</span>`, {
+                className: 'city-label-popup',
+                offset: [0, -8]
+            }).openPopup();
+
+            // Destination Marker (Emerald)
+            const iconDest = L.divIcon({
+                className: 'custom-pin dest',
+                html: '<div class="pin-ring"></div><div class="pin-dot"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+            destMarker2D = L.marker([lat2, lon2], { icon: iconDest }).addTo(map2D);
+            destMarker2D.bindPopup(`<span class="pin-popup-label" style="color:#6ee7b7 !important;">🎯 ${meta.destName || 'Destination'}</span>`, {
+                className: 'city-label-popup',
+                offset: [0, -8]
+            });
+
+            // Smoothly Fit Both Cities on Screen with Padding
+            map2D.fitBounds([[lat1, lon1], [lat2, lon2]], { padding: [40, 40], maxZoom: 14 });
+        }
+
+        function clearRoute3D() {
+            if (routeCurveMesh) { scene.remove(routeCurveMesh); routeCurveMesh = null; }
+            if (pulseParticle) { scene.remove(pulseParticle); pulseParticle = null; }
+            if (originMarker) { scene.remove(originMarker); originMarker = null; }
+            if (destMarker) { scene.remove(destMarker); destMarker = null; }
+        }
+
+        function clearRoute2D() {
+            if (routePolyline2D && map2D) map2D.removeLayer(routePolyline2D);
+            if (drivingPolyline && map2D) map2D.removeLayer(drivingPolyline);
+            if (originMarker2D && map2D) map2D.removeLayer(originMarker2D);
+            if (destMarker2D && map2D) map2D.removeLayer(destMarker2D);
+        }
+
+        function hideRouteCard() {
+            clearRoute3D();
+            clearRoute2D();
+            activeRouteData = null;
+            document.getElementById('route-card').style.display = 'none';
+        }
+
+        // ==========================================
+        // TACTICAL INTELLIGENCE & NAVIGATION ENGINES
+        // ==========================================
+        let isRadarActive = false;
+        let isIssActive = false;
+        let issMarker2D = null;
+        let issTrail2D = [];
+        let issPolyline2D = null;
+        let lastIssData = null;
+        let issInterval = null;
+        let isQuakesActive = false;
+        let isNightActive = false;
+        let isPoiActive = false;
+
+        async function switchRouteType(type) {
+            currentRouteMode = type;
+            const btnFlight = document.getElementById('btn-route-flight');
+            const btnDrive = document.getElementById('btn-route-driving');
+            const planeIcon = document.getElementById('route-icon');
+            const metricSubLabel = document.getElementById('metric-sub-label');
+            const cardTitle = document.getElementById('route-card-title');
+
+            if (type === 'driving') {
+                btnDrive.classList.add('active');
+                btnFlight.classList.remove('active');
+                planeIcon.innerText = '🚗';
+                metricSubLabel.innerText = 'Road Mode';
+                cardTitle.innerHTML = '<span>🚗</span> HIGHWAY DRIVING NAVIGATION';
+
+                if (activeRouteData) {
+                    await fetchAndRenderDrivingRoute(activeRouteData);
+                }
+            } else {
+                btnFlight.classList.add('active');
+                btnDrive.classList.remove('active');
+                planeIcon.innerText = '✈';
+                metricSubLabel.innerText = 'Mode / Units';
+                cardTitle.innerHTML = '<span>⚡</span> ROUTE TELEMETRY';
+
+                if (drivingPolyline && map2D && map2D.hasLayer(drivingPolyline)) {
+                    map2D.removeLayer(drivingPolyline);
+                }
+                if (activeRouteData) {
+                    renderRoute2D(activeRouteData);
+                    const m = activeRouteData.meta || {};
+                    document.getElementById('route-dist-km').innerText = m.distance_km ? `${m.distance_km.toLocaleString()} km` : '---';
+                    document.getElementById('route-dist-nm').innerText = m.distance_nm ? `${m.distance_nm.toLocaleString()} NM` : '---';
+                    document.getElementById('route-flight-time').innerText = m.flight_time || '---';
+                    document.getElementById('route-bearing').innerText = m.bearing ? `${m.bearing}°` : '---';
+                }
+            }
+        }
+
+        async function fetchAndRenderDrivingRoute(routeData) {
+            init2DMap();
+            if (currentMode === "3D") switchMode("STREET");
+
+            const oLat = routeData.origLat;
+            const oLon = routeData.origLon;
+            const dLat = routeData.destLat;
+            const dLon = routeData.destLon;
+            const meta = routeData.meta || {};
+
+            if (meta.waypoints && meta.waypoints.length > 0 && meta.mode === 'driving') {
+                renderDrivingPolyline(meta.waypoints, meta.distance_km, meta.duration_str);
+                return;
+            }
+
+            const url = `https://router.project-osrm.org/route/v1/driving/${oLon},${oLat};${dLon},${dLat}?overview=full&geometries=geojson`;
+            try {
+                const resp = await fetch(url);
+                const json = await resp.json();
+                if (json.code === 'Ok' && json.routes && json.routes.length > 0) {
+                    const r = json.routes[0];
+                    const distKm = (r.distance / 1000).toFixed(1);
+                    const hrs = Math.floor(r.duration / 3600);
+                    const mins = Math.round((r.duration % 3600) / 60);
+                    const durStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} mins`;
+                    const coords = r.geometry.coordinates.map(pt => [pt[1], pt[0]]);
+                    renderDrivingPolyline(coords, distKm, durStr);
+                } else {
+                    switchRouteType('flight');
+                }
+            } catch (e) {
+                console.warn("OSRM driving route error", e);
+                switchRouteType('flight');
+            }
+        }
+
+        function renderDrivingPolyline(coords, distKm, durStr) {
+            if (routePolyline2D && map2D && map2D.hasLayer(routePolyline2D)) map2D.removeLayer(routePolyline2D);
+            if (drivingPolyline && map2D && map2D.hasLayer(drivingPolyline)) map2D.removeLayer(drivingPolyline);
+
+            drivingPolyline = L.polyline(coords, {
+                color: '#10b981',
+                weight: 4,
+                opacity: 0.95,
+                lineJoin: 'round'
+            }).addTo(map2D);
+
+            document.getElementById('route-dist-km').innerText = `${distKm} km`;
+            document.getElementById('route-dist-nm').innerText = `Road Highway`;
+            document.getElementById('route-flight-time').innerText = durStr;
+            document.getElementById('route-bearing').innerText = 'Turnpike';
+
+            map2D.fitBounds(drivingPolyline.getBounds(), { padding: [50, 50], maxZoom: 14 });
+        }
+
+        function showDrivingRoute(data) {
+            showRoute(data.originLat, data.originLon, data.destLat, data.destLon, data);
+            switchRouteType('driving');
+        }
+
+        // --- Weather Layer & Telemetry ---
+        async function fetchWeatherForLocation(lat, lon) {
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`;
+                const resp = await fetch(url);
+                const d = await resp.json();
+                const curr = d.current || {};
+                const temp = curr.temperature_2m !== undefined ? Math.round(curr.temperature_2m) : '--';
+                const hum = curr.relative_humidity_2m || '--';
+                const wind = curr.wind_speed_10m !== undefined ? Math.round(curr.wind_speed_10m) : '--';
+
+                const wcode = curr.weather_code || 0;
+                const icon = (wcode === 0) ? '☀️' : (wcode < 3) ? '⛅' : (wcode < 50) ? '☁️' : (wcode < 70) ? '🌧️' : '⛈️';
+                const cond = (wcode === 0) ? 'Clear Sky' : (wcode < 3) ? 'Partly Cloudy' : (wcode < 50) ? 'Overcast' : (wcode < 70) ? 'Rain' : 'Thunderstorm';
+
+                document.getElementById('weather-icon').innerText = icon;
+                document.getElementById('weather-temp').innerText = `${temp}°C`;
+                document.getElementById('loc-weather-pill').style.display = 'inline-flex';
+                document.getElementById('weather-hum').innerText = hum;
+                document.getElementById('weather-wind').innerText = wind;
+                document.getElementById('weather-cond').innerText = cond;
+                document.getElementById('loc-weather-details').style.display = 'block';
+            } catch (e) {}
+        }
+
+        async function toggleRadar() {
+            isRadarActive = !isRadarActive;
+            const btn = document.getElementById('btn-layer-radar');
+            if (btn) btn.classList.toggle('active', isRadarActive);
+            if (!map2D) init2DMap();
+            if (isRadarActive) {
+                if (currentMode === "3D") switchMode("STREET");
+                try {
+                    const resp = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+                    const data = await resp.json();
+                    const past = data.radar && data.radar.past ? data.radar.past : [];
+                    if (past.length > 0) {
+                        const ts = past[past.length - 1].time;
+                        if (radarLayer && map2D.hasLayer(radarLayer)) map2D.removeLayer(radarLayer);
+                        radarLayer = L.tileLayer(`https://tilecache.rainviewer.com/v2/radar/${ts}/256/{z}/{x}/{y}/2/1_1.png`, {
+                            opacity: 0.65,
+                            zIndex: 15
+                        }).addTo(map2D);
+                    }
+                } catch (e) {
+                    console.warn("RainViewer fetch error", e);
+                }
+            } else {
+                if (radarLayer && map2D && map2D.hasLayer(radarLayer)) {
+                    map2D.removeLayer(radarLayer);
+                }
+            }
+        }
+
+        function toggleWeatherRadar(data) {
+            if (data && data.enable !== undefined) {
+                isRadarActive = !data.enable;
+            }
+            toggleRadar();
+        }
+
+        // --- ISS Satellite Tracker ---
+        async function fetchIssTelemetry() {
+            try {
+                const resp = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
+                const d = await resp.json();
+                lastIssData = d;
+                updateIssDisplay(d);
+            } catch (e) {
+                try {
+                    const resp2 = await fetch('https://api.open-notify.org/iss-now.json');
+                    const d2 = await resp2.json();
+                    const p = d2.iss_position;
+                    const data = {
+                        latitude: parseFloat(p.latitude),
+                        longitude: parseFloat(p.longitude),
+                        altitude: 420.0,
+                        velocity: 27600.0,
+                    };
+                    lastIssData = data;
+                    updateIssDisplay(data);
+                } catch (err) {}
+            }
+        }
+
+        function updateIssDisplay(d) {
+            const lat = d.latitude || d.lat || 0;
+            const lon = d.longitude || d.lon || 0;
+            const alt = Math.round(d.altitude || d.altitude_km || 420);
+            const vel = Math.round(d.velocity || d.velocity_kmh || 27600).toLocaleString();
+
+            document.getElementById('iss-velocity').innerText = `${vel} km/h`;
+            document.getElementById('iss-altitude').innerText = `${alt} km`;
+            document.getElementById('iss-lat').innerText = `${lat.toFixed(2)}°`;
+            document.getElementById('iss-lon').innerText = `${lon.toFixed(2)}°`;
+
+            if (map2D && issLayer) {
+                if (!issMarker2D) {
+                    const icon = L.divIcon({
+                        className: 'iss-pin',
+                        html: `<div style="font-size:22px; filter:drop-shadow(0 0 8px #38bdf8);">🛰️</div>`,
+                        iconSize: [26, 26],
+                        iconAnchor: [13, 13]
+                    });
+                    issMarker2D = L.marker([lat, lon], { icon: icon }).addTo(issLayer);
+                } else {
+                    issMarker2D.setLatLng([lat, lon]);
+                }
+
+                issTrail2D.push([lat, lon]);
+                if (issTrail2D.length > 50) issTrail2D.shift();
+                if (issPolyline2D) issLayer.removeLayer(issPolyline2D);
+                issPolyline2D = L.polyline(issTrail2D, {
+                    color: '#38bdf8',
+                    weight: 2,
+                    dashArray: '4, 4',
+                    opacity: 0.8
+                }).addTo(issLayer);
+            }
+
+            if (scene && issMarker3D) {
+                const pos = latLonToVector3(lat, lon, GLOBE_RADIUS + 16);
+                issMarker3D.position.copy(pos);
+            }
+        }
+
+        function toggleIss() {
+            isIssActive = !isIssActive;
+            const btn = document.getElementById('btn-layer-iss');
+            if (btn) btn.classList.toggle('active', isIssActive);
+            const card = document.getElementById('iss-card');
+
+            if (isIssActive) {
+                card.style.display = 'flex';
+                if (!issMarker3D && scene) {
+                    const g = new THREE.SphereGeometry(2.5, 12, 12);
+                    const m = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+                    issMarker3D = new THREE.Mesh(g, m);
+                    const rGeo = new THREE.RingGeometry(3.5, 5.0, 16);
+                    const rMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+                    const ring = new THREE.Mesh(rGeo, rMat);
+                    issMarker3D.add(ring);
+                    scene.add(issMarker3D);
+                }
+                fetchIssTelemetry();
+                if (issInterval) clearInterval(issInterval);
+                issInterval = setInterval(fetchIssTelemetry, 5000);
+            } else {
+                card.style.display = 'none';
+                if (issInterval) clearInterval(issInterval);
+                if (issLayer) issLayer.clearLayers();
+                issMarker2D = null;
+                if (issMarker3D && scene) scene.remove(issMarker3D);
+                issMarker3D = null;
+            }
+        }
+
+        function setIssData(data) {
+            if (!isIssActive) toggleIss();
+            if (data) {
+                lastIssData = data;
+                updateIssDisplay(data);
+                centerIss();
+            }
+        }
+
+        function centerIss() {
+            if (lastIssData) {
+                const lat = lastIssData.latitude || lastIssData.lat;
+                const lon = lastIssData.longitude || lastIssData.lon;
+                if (currentMode === "3D") {
+                    flyTo(lat, lon, 200);
+                } else if (map2D) {
+                    map2D.flyTo([lat, lon], 5);
+                }
+            }
+        }
+
+        function closeIssCard() {
+            toggleIss();
+        }
+
+        // --- Earthquakes ---
+        async function toggleEarthquakes() {
+            isQuakesActive = !isQuakesActive;
+            const btn = document.getElementById('btn-layer-quakes');
+            if (btn) btn.classList.toggle('active', isQuakesActive);
+            const card = document.getElementById('earthquake-card');
+
+            if (isQuakesActive) {
+                card.style.display = 'flex';
+                try {
+                    const resp = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson');
+                    const data = await resp.json();
+                    renderEarthquakes(data.features || []);
+                } catch (e) {
+                    document.getElementById('earthquake-summary').innerText = 'Seismic network offline or unreachable.';
+                }
+            } else {
+                card.style.display = 'none';
+                if (earthquakeLayer) earthquakeLayer.clearLayers();
+                if (earthquake3DGroup && scene) scene.remove(earthquake3DGroup);
+                earthquake3DGroup = null;
+            }
+        }
+
+        function setEarthquakes(data) {
+            if (!isQuakesActive) toggleEarthquakes();
+            if (Array.isArray(data)) {
+                const feats = data.map(d => ({
+                    properties: { mag: d.magnitude, place: d.place },
+                    geometry: { coordinates: [d.lon, d.lat, d.depth_km] }
+                }));
+                renderEarthquakes(feats);
+            }
+        }
+
+        function renderEarthquakes(features) {
+            if (!map2D) init2DMap();
+            if (!earthquakeLayer) earthquakeLayer = L.layerGroup().addTo(map2D);
+            earthquakeLayer.clearLayers();
+
+            if (scene) {
+                if (earthquake3DGroup) scene.remove(earthquake3DGroup);
+                earthquake3DGroup = new THREE.Group();
+                scene.add(earthquake3DGroup);
+            }
+
+            const listDiv = document.getElementById('earthquake-list');
+            listDiv.innerHTML = '';
+            const filtered = features.filter(f => f.properties && f.properties.mag >= 2.5).slice(0, 30);
+            document.getElementById('earthquake-summary').innerText = `Active: ${filtered.length} seismic events (M2.5+) in past 24h`;
+
+            filtered.forEach(f => {
+                const mag = f.properties.mag;
+                const place = f.properties.place || 'Unknown Epicenter';
+                const coords = f.geometry.coordinates;
+                const lon = coords[0];
+                const lat = coords[1];
+                const depth = coords[2] || 0;
+
+                const color = mag >= 5.5 ? '#ef4444' : mag >= 4.0 ? '#f59e0b' : '#38bdf8';
+
+                if (map2D) {
+                    const circle = L.circleMarker([lat, lon], {
+                        radius: Math.max(4, mag * 2.2),
+                        fillColor: color,
+                        color: color,
+                        weight: 1.5,
+                        opacity: 0.9,
+                        fillOpacity: 0.5
+                    }).addTo(earthquakeLayer);
+                    circle.bindPopup(`<b style="color:${color}; font-size:11px;">M ${mag.toFixed(1)} Earthquake</b><br><span style="font-size:10px;">${place}</span><br><span style="font-size:9px; color:#94a3b8;">Depth: ${depth} km</span>`);
+                }
+
+                if (earthquake3DGroup) {
+                    const r = GLOBE_RADIUS + 0.5;
+                    const geo = new THREE.SphereGeometry(Math.max(0.6, mag * 0.25), 8, 8);
+                    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color) });
+                    const m = new THREE.Mesh(geo, mat);
+                    const pos = latLonToVector3(lat, lon, r);
+                    m.position.copy(pos);
+                    earthquake3DGroup.add(m);
+                }
+
+                const item = document.createElement('div');
+                item.className = 'intel-item';
+                item.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:700; color:${color}; font-size:11px;">M ${mag.toFixed(1)}</span>
+                        <span style="color:#64748b; font-size:9px;">${depth} km</span>
+                    </div>
+                    <div style="color:#cbd5e1; font-size:10px; margin-top:2px;">${place}</div>
+                `;
+                item.onclick = () => {
+                    if (currentMode === "3D") {
+                        flyTo(lat, lon, 150);
+                    } else if (map2D) {
+                        map2D.flyTo([lat, lon], 7);
+                    }
+                };
+                listDiv.appendChild(item);
+            });
+        }
+
+        function closeEarthquakeCard() {
+            toggleEarthquakes();
+        }
+
+        // --- Day / Night Solar Terminator ---
+        function toggleNight() {
+            isNightActive = !isNightActive;
+            const btn = document.getElementById('btn-layer-night');
+            if (btn) btn.classList.toggle('active', isNightActive);
+
+            if (!map2D) init2DMap();
+            if (isNightActive) {
+                updateNightTerminator();
+            } else {
+                if (nightPolygon2D && map2D && map2D.hasLayer(nightPolygon2D)) {
+                    map2D.removeLayer(nightPolygon2D);
+                    nightPolygon2D = null;
+                }
+            }
+        }
+
+        function updateNightTerminator() {
+            if (!map2D) return;
+            const now = new Date();
+            const start = new Date(Date.UTC(now.getUTCFullYear(), 0, 0));
+            const diff = now - start;
+            const oneDay = 1000 * 60 * 60 * 24;
+            const dayOfYear = Math.floor(diff / oneDay);
+
+            const dec = Math.asin(Math.sin(-23.44 * Math.PI / 180) * Math.cos(2 * Math.PI / 365.25 * (dayOfYear + 10)));
+            const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+            const gha = (utcHours - 12) * 15;
+
+            const coords = [];
+            for (let lon = -180; lon <= 180; lon += 4) {
+                const radLon = (lon + gha) * Math.PI / 180;
+                const tanLat = -Math.cos(radLon) / Math.tan(dec);
+                let lat = Math.atan(tanLat) * 180 / Math.PI;
+                coords.push([lat, lon]);
+            }
+
+            const darkPole = dec >= 0 ? -90 : 90;
+            coords.push([darkPole, 180]);
+            coords.push([darkPole, -180]);
+
+            if (nightPolygon2D && map2D.hasLayer(nightPolygon2D)) {
+                map2D.removeLayer(nightPolygon2D);
+            }
+            nightPolygon2D = L.polygon(coords, {
+                color: 'transparent',
+                fillColor: '#020617',
+                fillOpacity: 0.45,
+                interactive: false
+            }).addTo(map2D);
+        }
+
+        // --- Nearby POI Scanner ---
+        function togglePoiCard() {
+            isPoiActive = !isPoiActive;
+            const btn = document.getElementById('btn-layer-poi');
+            if (btn) btn.classList.toggle('active', isPoiActive);
+            const card = document.getElementById('poi-card');
+            if (card) card.style.display = isPoiActive ? 'flex' : 'none';
+            if (isPoiActive) {
+                const input = document.getElementById('poi-search-input');
+                if (input) input.focus();
+            } else {
+                if (poiLayer) poiLayer.clearLayers();
+            }
+        }
+
+        async function searchPoi(customQuery) {
+            const input = document.getElementById('poi-search-input');
+            const q = customQuery || (input ? input.value.trim() : "") || "hospitals";
+            if (!map2D) init2DMap();
+            if (currentMode === "3D") switchMode("STREET");
+
+            const center = map2D.getCenter();
+            const lat = center.lat;
+            const lon = center.lng;
+
+            const listDiv = document.getElementById('poi-list');
+            listDiv.innerHTML = '<div style="color:#64748b; font-size:10px; padding:8px;">Scanning area...</div>';
+
+            const viewbox = `${lon - 0.25},${lat + 0.25},${lon + 0.25},${lat - 0.25}`;
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&viewbox=${viewbox}&bounded=0&limit=12`;
+
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                renderNearbyPlaces(data, q);
+            } catch (e) {
+                listDiv.innerHTML = '<div style="color:#f87171; font-size:10px;">Failed to scan places.</div>';
+            }
+        }
+
+        function setNearbyPlaces(data) {
+            if (currentMode === "3D") switchMode("STREET");
+            if (!isPoiActive) togglePoiCard();
+            const q = data.query || 'Nearby';
+            const places = data.places || [];
+            renderNearbyPlaces(places, q);
+            if (places && places.length > 0 && map2D && poiLayer) {
+                setTimeout(() => {
+                    try {
+                        const layers = poiLayer.getLayers();
+                        if (layers.length > 0) {
+                            const group = L.featureGroup(layers);
+                            if (group.getBounds().isValid()) {
+                                map2D.fitBounds(group.getBounds().pad(0.25));
+                            }
+                        }
+                    } catch (e) {}
+                }, 150);
+            }
+        }
+
+        function renderNearbyPlaces(places, query) {
+            if (!map2D) init2DMap();
+            if (!poiLayer) poiLayer = L.layerGroup().addTo(map2D);
+            poiLayer.clearLayers();
+
+            const listDiv = document.getElementById('poi-list');
+            listDiv.innerHTML = '';
+
+            if (!places || places.length === 0) {
+                listDiv.innerHTML = `<div style="color:#94a3b8; font-size:10px; padding:6px;">No results found for "${query}".</div>`;
+                return;
+            }
+
+            places.forEach((p, idx) => {
+                const pLat = parseFloat(p.lat);
+                const pLon = parseFloat(p.lon);
+                const name = p.name || p.display_name.split(',')[0];
+                const dist = p.distance_km ? `${p.distance_km} km away` : '';
+
+                const icon = L.divIcon({
+                    className: 'custom-pin',
+                    html: `<div class="pin-ring" style="border-color:#ec4899;"></div><div class="pin-dot" style="background:#ec4899; box-shadow:0 0 10px #ec4899;"></div>`,
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+                const marker = L.marker([pLat, pLon], { icon: icon }).addTo(poiLayer);
+                marker.bindPopup(`<b style="color:#ec4899; font-size:11px;">📍 ${name}</b><br><span style="font-size:10px; color:#38bdf8; font-weight:600;">${dist}</span><br><span style="font-size:9px; color:#cbd5e1;">${p.display_name}</span>`);
+
+                const item = document.createElement('div');
+                item.className = 'intel-item';
+                item.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:700; color:#f472b6; font-size:11px;">📍 ${name}</span>
+                        <span style="color:#38bdf8; font-size:9px; font-weight:600;">${dist}</span>
+                    </div>
+                    <div style="color:#94a3b8; font-size:9px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${p.display_name}</div>
+                `;
+                item.onclick = () => {
+                    map2D.flyTo([pLat, pLon], 16);
+                    marker.openPopup();
+                };
+                listDiv.appendChild(item);
+
+                if (idx === 0) {
+                    marker.openPopup();
+                }
+            });
+        }
+
+        function closePoiCard() {
+            togglePoiCard();
+        }
+
+        // ==========================================
+        // 7. LIVE FLIGHT RADAR
+        // ==========================================
+        function setFlights(flights) {
+            activeFlights = flights || [];
+
+            // 3D Flights
+            flightGroup.clear();
+
+            // 2D Flights
+            if (flightLayer2D) flightLayer2D.clearLayers();
+
+            const pill = document.getElementById('status-flights-pill');
+            const cnt = document.getElementById('status-flights-count');
+
+            if (activeFlights.length > 0) {
+                pill.style.display = 'block';
+                cnt.innerText = activeFlights.length;
+
+                // Batch aircraft into one draw call instead of creating one mesh per plane.
+                const planes = new THREE.InstancedMesh(flightGeometry, flightMaterial, activeFlights.length);
+                const transform = new THREE.Object3D();
+
+                for (let i = 0; i < activeFlights.length; i++) {
+                    const f = activeFlights[i];
+                    const lat = parseFloat(f.lat || f.latitude || 0);
+                    const lon = parseFloat(f.lon || f.longitude || 0);
+
+                    // 3D Plane
+                    const pos = latLonToVector3(lat, lon, GLOBE_RADIUS + 2.0);
+                    transform.position.copy(pos);
+                    transform.lookAt(pos.clone().multiplyScalar(2));
+                    transform.updateMatrix();
+                    planes.setMatrixAt(i, transform.matrix);
+
+                    // 2D Plane
+                    if (flightLayer2D && map2D) {
+                        const m = L.circleMarker([lat, lon], {
+                            radius: 4,
+                            color: '#10b981',
+                            fillColor: '#6ee7b7',
+                            fillOpacity: 0.8
+                        });
+                        if (f.callsign) m.bindTooltip(`✈ ${f.callsign}`, { permanent: false });
+                        flightLayer2D.addLayer(m);
+                    }
+                }
+                planes.instanceMatrix.needsUpdate = true;
+                flightGroup.add(planes);
+            } else {
+                pill.style.display = 'none';
+            }
+        }
+
+        function toggleSpin() {
+            autoSpin = !autoSpin;
+            const btn = document.getElementById('btn-spin');
+            btn.innerHTML = autoSpin ? '<span>⏸</span> Pause' : '<span>▶</span> Spin';
+        }
+
+        function resetView() {
+            if (tileLayerStreet && map2D) {
+                const CARTO_API_KEY = "cb1_3xgr_1_35c1dc6a9a9b23cb25386cb6";
+                tileLayerStreet.setUrl(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_API_KEY}&v=2`);
+                tileLayerStreet.redraw();
+            }
+            flyTo(20.5937, 78.9629, 230);
+            autoSpin = true;
+            document.getElementById('btn-spin').innerHTML = '<span>⏸</span> Pause';
+            if (currentMode !== "3D") switchMode("3D");
+        }
+
+        function requestClose() {
+            if (window.qtBridge && window.qtBridge.closeGlobe) {
+                window.qtBridge.closeGlobe();
+            } else {
+                window.close();
+            }
+        }
+
+        let resizeTimeout = null;
+        function onWindowResize() {
+            if (resizeTimeout) cancelAnimationFrame(resizeTimeout);
+            resizeTimeout = requestAnimationFrame(() => {
+                const container = document.getElementById('globe3d-container');
+                if (!container) return;
+                const w = container.clientWidth || window.innerWidth;
+                const h = container.clientHeight || window.innerHeight;
+                if (camera && renderer) {
+                    camera.aspect = w / h;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(w, h);
+                    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
+                }
+                if (map2D) {
+                    map2D.invalidateSize();
+                }
+            });
+        }
+
+        // ==========================================
+        // 8. GLOBAL PYTHON / WEBCHANNEL API
+        // ==========================================
+        window.SaturnGlobe = {
+            pause: () => pauseGlobe(),
+            resume: () => resumeGlobe(),
+            showLocation: (data) => showLocation(data),
+            showRoute: (data) => showRoute(data.originLat, data.originLon, data.destLat, data.destLon, data),
+            showDrivingRoute: (data) => showDrivingRoute(data),
+            setIssData: (data) => setIssData(data),
+            setEarthquakes: (data) => setEarthquakes(data),
+            setNearbyPlaces: (data) => setNearbyPlaces(data),
+            toggleWeatherRadar: (data) => toggleWeatherRadar(data),
+            toggleIssTracker: () => toggleIss(),
+            toggleEarthquakes: () => toggleEarthquakes(),
+            toggleNightShadow: () => toggleNight(),
+            togglePoiRadar: () => togglePoiCard(),
+            flyTo: (lat, lon, dist) => flyTo(lat, lon, dist),
+            setFlights: (flights) => setFlights(flights),
+            clearRoute: () => hideRouteCard(),
+            switchMode: (m) => switchMode(m),
+            resetView: () => resetView(),
+            updateCartoKey: (k) => {
+                if (tileLayerStreet) {
+                    tileLayerStreet.setUrl(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${k}&v=2`);
+                    tileLayerStreet.redraw();
+                }
+            },
+            getCurrentView: () => {
+                if (currentMode !== "3D" && map2D) {
+                    const c = map2D.getCenter();
+                    const b = map2D.getBounds();
+                    return {
+                        centerLat: c.lat,
+                        centerLon: c.lng,
+                        bounds: {
+                            minLat: b.getSouth(),
+                            maxLat: b.getNorth(),
+                            minLon: b.getWest(),
+                            maxLon: b.getEast()
+                        }
+                    };
+                }
+                const c = getCameraLatLon();
+                return {
+                    centerLat: c.lat,
+                    centerLon: c.lon,
+                    bounds: {
+                        minLat: Math.max(-90, c.lat - 25),
+                        maxLat: Math.min(90, c.lat + 25),
+                        minLon: c.lon - 25,
+                        maxLon: c.lon + 25
+                    }
+                };
+            }
+        };
+
+        // Initialize 3D Globe immediately on startup
+        init3DGlobe();
+    </script>
+</body>
+</html>

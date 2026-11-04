@@ -1,0 +1,13 @@
+﻿*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+.kotlin
+app/build/
+
+# The release key and its passwords never belong in the repository.
+keystore.properties
+*.jks
+*.keystore

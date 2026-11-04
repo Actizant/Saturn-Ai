@@ -1,0 +1,22 @@
+Saturn
+Copyright 2026 Actizant (Shreshtha Das and Soumwadeep Guha)
+
+This product includes software developed at Actizant.
+
+================================================================================
+Third-party notices
+================================================================================
+
+Saturn vendors CesiumJS for its WebGL globe (assets/saturn_view).
+
+  CesiumJS
+  Copyright 2018-2026 Cesium GS, Inc. and Contributors
+  Licensed under the Apache License, Version 2.0
+  https://github.com/CesiumGS/cesium
+
+CesiumJS is an independent renderer; the Saturn engine, shell, layer model and
+freshness contract are original works of Actizant and are covered by this
+repository's Apache License, Version 2.0.
+
+The Saturn name, wordmark and logo are trademarks of Actizant and are not
+granted by the Apache License. See TRADEMARK.md.

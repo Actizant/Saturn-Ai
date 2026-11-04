@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Saturn - Storage Sentinel</title>
+  <style>
+    :root {
+      --bg: #07090e;
+      --card-bg: rgba(13, 17, 27, 0.75);
+      --card-border: rgba(0, 243, 255, 0.2);
+      --cyan: #00f3ff;
+      --cyan-glow: rgba(0, 243, 255, 0.4);
+      --amber: #ffaa00;
+      --amber-glow: rgba(255, 170, 0, 0.4);
+      --violet: #a855f7;
+      --rose: #f43f5e;
+      --emerald: #10b981;
+      --sky: #38bdf8;
+      --pink: #ec4899;
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --font-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      background-image: 
+        radial-gradient(circle at 50% 30%, rgba(0, 243, 255, 0.05) 0%, transparent 60%),
+        radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.04) 0%, transparent 50%),
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 30px 30px, 30px 30px;
+    }
+
+    /* Ambient scanlines */
+    body::after {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+      background-size: 100% 4px;
+      z-index: 100;
+      pointer-events: none;
+      opacity: 0.35;
+    }
+
+    /* Header Bar */
+    header {
+      height: 52px;
+      background: rgba(10, 14, 22, 0.9);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      letter-spacing: 1.5px;
+      color: var(--cyan);
+      text-shadow: 0 0 10px var(--cyan-glow);
+    }
+
+    .brand .logo-icon {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--cyan);
+      border-radius: 3px;
+      transform: rotate(45deg);
+      box-shadow: 0 0 8px var(--cyan);
+      animation: pulse 2.5s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; transform: rotate(45deg) scale(0.95); }
+      50% { opacity: 1; transform: rotate(45deg) scale(1.1); }
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Windows Storage Sense Quick Link Button */
+    .storage-sense-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(0, 243, 255, 0.06);
+      border: 1px solid rgba(0, 243, 255, 0.3);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      color: var(--cyan);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .storage-sense-pill:hover {
+      background: rgba(0, 243, 255, 0.15);
+      border-color: var(--cyan);
+      box-shadow: 0 0 12px rgba(0, 243, 255, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .win-icon {
+      flex-shrink: 0;
+      color: #38bdf8;
+    }
+
+    .sense-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--emerald);
+      box-shadow: 0 0 6px var(--emerald);
+    }
+
+    .sense-dot.inactive {
+      background: var(--amber);
+      box-shadow: 0 0 6px var(--amber);
+    }
+
+    /* Drive Selector Dropdown */
+    .drive-select-container {
+      position: relative;
+    }
+
+    .drive-select-trigger {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .drive-select-trigger:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--cyan);
+    }
+
+    .drive-select-trigger .chevron {
+      font-size: 10px;
+      color: var(--cyan);
+      transition: transform 0.2s;
+    }
+
+    .drive-select-trigger.active .chevron {
+      transform: rotate(180deg);
+    }
+
+    .drive-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      width: 280px;
+      background: rgba(10, 14, 22, 0.98);
+      border: 1px solid var(--cyan);
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(20px);
+      display: none;
+      flex-direction: column;
+      padding: 6px;
+      gap: 4px;
+      z-index: 1000;
+    }
+
+    .drive-dropdown-menu.open {
+      display: flex;
+    }
+
+    .drive-option {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.15s;
+      border: 1px solid transparent;
+    }
+
+    .drive-option:hover {
+      background: rgba(0, 243, 255, 0.1);
+      border-color: rgba(0, 243, 255, 0.3);
+    }
+
+    .drive-option.selected {
+      background: rgba(0, 243, 255, 0.15);
+      border-color: var(--cyan);
+    }
+
+    .drive-opt-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .drive-opt-title {
+      font-weight: 700;
+      color: var(--cyan);
+    }
+
+    .drive-opt-tag {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .drive-mini-bar {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+
+    .drive-mini-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+    }
+
+    .drive-opt-stats {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .close-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .close-btn:hover {
+      background: rgba(244, 63, 94, 0.2);
+      border-color: var(--rose);
+      color: #fff;
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 390px;
+      gap: 16px;
+      padding: 16px;
+      overflow: hidden;
+      z-index: 5;
+    }
+
+    /* Visualizer Panel (Sunburst Chart) */
+    .visualizer-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .card-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+    }
+
+    .canvas-container {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #sunburstCanvas {
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+    }
+
+    /* Center Stats Overlay */
+    .center-disk-stats {
+      position: absolute;
+      text-align: center;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .center-disk-stats .val {
+      font-family: var(--font-mono);
+      font-size: 26px;
+      font-weight: 800;
+      color: #fff;
+      text-shadow: 0 0 14px var(--cyan-glow);
+    }
+
+    .center-disk-stats .lbl {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      letter-spacing: 1.5px;
+      color: var(--cyan);
+      margin-top: 3px;
+    }
+
+    .center-disk-stats .sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-family: var(--font-mono);
+    }
+
+    /* Right Telemetry Panel */
+    .telemetry-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      gap: 12px;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .telemetry-card::-webkit-scrollbar {
+      width: 5px;
+    }
+    .telemetry-card::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .telemetry-card::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+    }
+
+    /* Drive Capacity Meter */
+    .drive-meter-box {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .meter-labels {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .meter-bar {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .meter-fill-used {
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      border-radius: 4px;
+      transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 0 10px rgba(0, 243, 255, 0.4);
+    }
+
+    /* Junk Overview Card */
+    .junk-overview {
+      background: linear-gradient(135deg, rgba(0, 243, 255, 0.08), rgba(168, 85, 247, 0.08));
+      border: 1px solid rgba(0, 243, 255, 0.25);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .junk-overview .val {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--cyan);
+      text-shadow: 0 0 12px var(--cyan-glow);
+    }
+
+    .junk-overview .lbl {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .badge-safe {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid var(--emerald);
+      color: var(--emerald);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    /* Category Checklist */
+    .category-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .category-item {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .category-item:hover, .category-item.active {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(0, 243, 255, 0.35);
+      transform: translateX(2px);
+    }
+
+    .cat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .cat-checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+
+    .custom-check {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 1.5px solid var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    input[type="checkbox"] {
+      display: none;
+    }
+
+    input[type="checkbox"]:checked + .custom-check {
+      background: var(--cyan);
+      border-color: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    input[type="checkbox"]:checked + .custom-check::after {
+      content: "✓";
+      color: #07090e;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .cat-name {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .cat-size {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--cyan);
+    }
+
+    .cat-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.3;
+      padding-left: 26px;
+    }
+
+    /* Culprit file chips */
+    .culprits-tray {
+      margin-top: 3px;
+      padding-left: 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .culprit-chip {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      background: rgba(0, 0, 0, 0.3);
+      padding: 3px 6px;
+      border-radius: 3px;
+      display: flex;
+      justify-content: space-between;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Footer status & Actions */
+    footer {
+      height: 60px;
+      background: rgba(10, 14, 22, 0.95);
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 10;
+    }
+
+    .status-ticker {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--emerald);
+      box-shadow: 0 0 8px var(--emerald);
+    }
+
+    .status-dot.scanning {
+      background: var(--amber);
+      box-shadow: 0 0 8px var(--amber);
+      animation: pulse 1s infinite;
+    }
+
+    .action-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      padding: 10px 18px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, rgba(0, 243, 255, 0.2), rgba(168, 85, 247, 0.2));
+      border: 1px solid var(--cyan);
+      color: #fff;
+      box-shadow: 0 0 16px rgba(0, 243, 255, 0.25);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, rgba(0, 243, 255, 0.35), rgba(168, 85, 247, 0.35));
+      box-shadow: 0 0 24px rgba(0, 243, 255, 0.5);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:active {
+      transform: translateY(1px);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="logo-icon"></div>
+      <span>SATURN // STORAGE SENTINEL</span>
+    </div>
+    <div class="header-controls">
+      <!-- Windows Storage Sense Quick Link Button -->
+      <button class="storage-sense-pill" id="storageSenseBtn" onclick="openStorageSense()" title="Windows Storage Sense. Click to open native Windows Storage Settings">
+        <svg class="win-icon" viewBox="0 0 16 16" width="13" height="13">
+          <path fill="currentColor" d="M0 2.25L6.5 1.34v6.24H0V2.25zM6.5 8.42v6.24L0 13.75V8.42h6.5zM7.34 1.22L16 0v7.58H7.34V1.22zM16 8.42v7.58L7.34 14.78V8.42H16z"/>
+        </svg>
+        <span>STORAGE SENSE</span>
+        <span class="sense-dot" id="senseStatusDot"></span>
+      </button>
+
+      <!-- Drive Selector Dropdown -->
+      <div class="drive-select-container">
+        <button class="drive-select-trigger" id="driveTrigger" onclick="toggleDriveDropdown()">
+          <span>💾</span>
+          <span id="currentDriveLabel">C: [SYSTEM]</span>
+          <span class="chevron">▾</span>
+        </button>
+        <div class="drive-dropdown-menu" id="driveDropdownMenu">
+          <!-- Dynamically populated drive items -->
+        </div>
+      </div>
+
+      <button class="close-btn" onclick="requestClose()" title="Close Sentinel">✕</button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main>
+    <!-- Visualizer Panel -->
+    <div class="visualizer-card">
+      <div class="card-header">
+        <span class="card-title">CONCENTRIC DISK SECTOR MAP</span>
+        <span style="font-family: var(--font-mono); font-size: 11px; color: var(--cyan);" id="sectorInspectTitle">HOVER SECTOR TO INSPECT</span>
+      </div>
+      <div class="canvas-container">
+        <canvas id="sunburstCanvas"></canvas>
+        <div class="center-disk-stats" id="centerStats">
+          <div class="val" id="centerFreeVal">-- GB</div>
+          <div class="lbl" id="centerFreeLbl">AVAILABLE SPACE</div>
+          <div class="sub" id="centerUsedSub">Used: -- GB (--%)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Telemetry Panel -->
+    <div class="telemetry-card">
+      <!-- Drive Meter -->
+      <div class="drive-meter-box">
+        <div class="meter-labels">
+          <span style="color: var(--cyan);" id="driveLabel">System Volume (C:)</span>
+          <span id="meterPercentText">--% Capacity</span>
+        </div>
+        <div class="meter-bar">
+          <div class="meter-fill-used" id="meterFill" style="width: 50%;"></div>
+        </div>
+      </div>
+
+      <!-- Junk Overview -->
+      <div class="junk-overview">
+        <div class="info">
+          <div class="val" id="reclaimableVal">-- GB</div>
+          <div class="lbl">RECLAIMABLE STORAGE</div>
+        </div>
+        <div class="badge-safe" id="safeBadge">⚡ Safe Purge: -- GB</div>
+      </div>
+
+      <!-- Category List -->
+      <div class="card-title" style="margin-top: 4px;">TARGET CATEGORIES</div>
+      <div class="category-list" id="categoryList">
+        <!-- Dynamically populated categories -->
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer Actions -->
+  <footer>
+    <div class="status-ticker">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Storage Sentinel Initialized. Ready for scan.</span>
+    </div>
+    <div class="action-group">
+      <button class="btn btn-secondary" onclick="requestScan()" id="rescanBtn">
+        <span>🔍 RE-SCAN</span>
+      </button>
+      <button class="btn btn-primary" onclick="requestPurge()" id="purgeBtn">
+        <span>🧹 PURGE SELECTED (<span id="purgeSizeBtn">0 GB</span>)</span>
+      </button>
+    </div>
+  </footer>
+
+  <!-- QWebChannel Bridge -->
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    let pyBridge = null;
+    let scanData = null;
+    let currentDrive = "C:\\";
+    let selectedCategories = new Set(["system_temp", "browser_cache", "crash_logs", "recycle_bin", "windows_update"]);
+
+    // Category Colors
+    const CAT_COLORS = {
+      system_temp: "#00f3ff",     // Cyan
+      browser_cache: "#ffaa00",   // Amber
+      crash_logs: "#f43f5e",      // Rose
+      recycle_bin: "#a855f7",     // Violet
+      windows_update: "#38bdf8",  // Sky Blue (Windows Update)
+      dev_caches: "#10b981",      // Emerald
+      heavy_files: "#ec4899",     // Pink/Magenta (Space Hogs)
+    };
+
+    // Canvas Sunburst state
+    let hoveredSlice = null;
+    let particles = [];
+
+    // Initialize Qt WebChannel
+    if (typeof QWebChannel !== "undefined") {
+      new QWebChannel(qt.webChannelTransport, function(channel) {
+        pyBridge = channel.objects.spaceCleanerBridge;
+        console.log("Storage Sentinel QWebChannel connected.");
+      });
+    }
+
+    function requestClose() {
+      if (pyBridge) pyBridge.closeWindow();
+      else window.close();
+    }
+
+    function openStorageSense() {
+      if (pyBridge && pyBridge.openStorageSense) {
+        pyBridge.openStorageSense();
+        setStatus("Opened native Windows Storage Sense settings.");
+      }
+    }
+
+    function toggleDriveDropdown() {
+      const menu = document.getElementById("driveDropdownMenu");
+      const trigger = document.getElementById("driveTrigger");
+      menu.classList.toggle("open");
+      trigger.classList.toggle("active");
+    }
+
+    // Close drive dropdown when clicking outside
+    document.addEventListener("click", (e) => {
+      const container = document.querySelector(".drive-select-container");
+      if (container && !container.contains(e.target)) {
+        document.getElementById("driveDropdownMenu").classList.remove("open");
+        document.getElementById("driveTrigger").classList.remove("active");
+      }
+    });
+
+    function selectDrive(mountpoint) {
+      document.getElementById("driveDropdownMenu").classList.remove("open");
+      document.getElementById("driveTrigger").classList.remove("active");
+      if (mountpoint === currentDrive) return;
+
+      currentDrive = mountpoint;
+      setStatus(`Switching active drive to ${mountpoint} and auditing clusters...`, true);
+      document.getElementById("rescanBtn").disabled = true;
+      document.getElementById("purgeBtn").disabled = true;
+
+      if (pyBridge && pyBridge.switchDrive) {
+        pyBridge.switchDrive(mountpoint);
+      }
+    }
+
+    function requestScan() {
+      setStatus(`Scanning storage on ${currentDrive}...`, true);
+      document.getElementById("rescanBtn").disabled = true;
+      document.getElementById("purgeBtn").disabled = true;
+      if (pyBridge) {
+        if (pyBridge.switchDrive) pyBridge.switchDrive(currentDrive);
+        else pyBridge.triggerScan();
+      }
+    }
+
+    function requestPurge() {
+      const selectedList = Array.from(selectedCategories);
+      if (selectedList.length === 0) return;
+      setStatus(`Purging selected sectors on ${currentDrive}...`, true);
+      document.getElementById("purgeBtn").disabled = true;
+      triggerPurgeParticles();
+      if (pyBridge) {
+        if (pyBridge.purgeCategoriesOnDrive) {
+          pyBridge.purgeCategoriesOnDrive(selectedList, currentDrive);
+        } else {
+          pyBridge.purgeCategories(selectedList);
+        }
+      }
+    }
+
+    function setStatus(msg, isScanning = false) {
+      document.getElementById("statusText").innerText = msg;
+      const dot = document.getElementById("statusDot");
+      if (isScanning) dot.classList.add("scanning");
+      else dot.classList.remove("scanning");
+    }
+
+    // Called from Python when scan finishes
+    function updateScanReport(data) {
+      scanData = data;
+      currentDrive = data.drive || "C:\\";
+
+      document.getElementById("rescanBtn").disabled = false;
+      document.getElementById("purgeBtn").disabled = false;
+
+      // Update Drive Selector & Badge
+      const shortName = currentDrive.replace(/\\$/, "");
+      document.getElementById("currentDriveLabel").innerText = `${shortName} [${data.is_system ? 'SYSTEM' : 'DATA'}]`;
+      document.getElementById("driveLabel").innerText = `${data.label || 'Volume'} (${shortName})`;
+      document.getElementById("meterPercentText").innerText = `${data.percent_used}% Used`;
+      document.getElementById("meterFill").style.width = `${data.percent_used}%`;
+
+      document.getElementById("centerFreeVal").innerText = `${data.free_gb} GB`;
+      document.getElementById("centerUsedSub").innerText = `Used: ${data.used_gb} GB (${data.percent_used}%)`;
+
+      document.getElementById("reclaimableVal").innerText = `${data.reclaimable_gb} GB`;
+      document.getElementById("safeBadge").innerText = `⚡ Safe: ${data.safe_reclaimable_gb} GB`;
+
+      // Update Windows Storage Sense Badge
+      if (data.storage_sense_info) {
+        const dot = document.getElementById("senseStatusDot");
+        if (data.storage_sense_info.os_enabled) {
+          dot.className = "sense-dot";
+          document.getElementById("storageSenseBtn").title = `Windows Storage Sense: Active (${data.storage_sense_info.cadence}). Click to open settings.`;
+        } else {
+          dot.className = "sense-dot inactive";
+          document.getElementById("storageSenseBtn").title = "Windows Storage Sense: Inactive. Click to configure.";
+        }
+      }
+
+      // Populate Drives Dropdown Menu
+      if (data.available_drives && data.available_drives.length > 0) {
+        renderDrivesMenu(data.available_drives, currentDrive);
+      }
+
+      // Update default selection for newly loaded categories
+      data.categories.forEach(c => {
+        if (c.preselected) selectedCategories.add(c.id);
+      });
+
+      renderCategories(data.categories);
+      updatePurgeButtonLabel();
+      setStatus(`Scan complete for ${currentDrive}: ${data.reclaimable_gb} GB reclaimable across ${data.categories.length} categories.`);
+      drawSunburst();
+    }
+
+    function renderDrivesMenu(drives, selectedMount) {
+      const menu = document.getElementById("driveDropdownMenu");
+      menu.innerHTML = "";
+
+      drives.forEach(drv => {
+        const isSel = (drv.mountpoint.toUpperCase() === selectedMount.toUpperCase());
+        const item = document.createElement("div");
+        item.className = `drive-option ${isSel ? 'selected' : ''}`;
+        item.onclick = () => selectDrive(drv.mountpoint);
+
+        item.innerHTML = `
+          <div class="drive-opt-header">
+            <span class="drive-opt-title">💾 ${drv.mountpoint} (${drv.label || 'Disk'})</span>
+            <span class="drive-opt-tag">${drv.tag || (drv.is_system ? 'OS' : 'Data')}</span>
+          </div>
+          <div class="drive-mini-bar">
+            <div class="drive-mini-fill" style="width: ${drv.percent_used}%;"></div>
+          </div>
+          <div class="drive-opt-stats">
+            <span>Free: ${drv.free_gb} GB</span>
+            <span>Total: ${drv.total_gb} GB (${drv.percent_used}% used)</span>
+          </div>
+        `;
+        menu.appendChild(item);
+      });
+    }
+
+    function renderCategories(categories) {
+      const container = document.getElementById("categoryList");
+      container.innerHTML = "";
+
+      categories.forEach(cat => {
+        const isChecked = selectedCategories.has(cat.id);
+        const item = document.createElement("div");
+        item.className = `category-item ${hoveredSlice === cat.id ? 'active' : ''}`;
+        item.id = `cat-item-${cat.id}`;
+
+        const color = CAT_COLORS[cat.id] || "#00f3ff";
+
+        let culpritsHtml = "";
+        if (cat.top_culprits && cat.top_culprits.length > 0) {
+          culpritsHtml = `<div class="culprits-tray">` + 
+            cat.top_culprits.slice(0, 3).map(c => 
+              `<div class="culprit-chip"><span>📄 ${c.name}</span><span>${c.size_mb} MB</span></div>`
+            ).join("") + 
+          `</div>`;
+        }
+
+        item.innerHTML = `
+          <div class="cat-header">
+            <label class="cat-checkbox-label">
+              <input type="checkbox" ${isChecked ? "checked" : ""} onchange="toggleCategory('${cat.id}', this.checked)">
+              <div class="custom-check" style="${isChecked ? `background: ${color}; border-color: ${color};` : ''}"></div>
+              <span class="cat-name" style="color: ${color}">${cat.name}</span>
+            </label>
+            <span class="cat-size">${cat.size_mb >= 1000 ? (cat.size_gb + " GB") : (cat.size_mb + " MB")}</span>
+          </div>
+          <div class="cat-desc">${cat.description} (${cat.item_count} items)</div>
+          ${culpritsHtml}
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function toggleCategory(catId, checked) {
+      if (checked) selectedCategories.add(catId);
+      else selectedCategories.delete(catId);
+      updatePurgeButtonLabel();
+      renderCategories(scanData.categories);
+      drawSunburst();
+    }
+
+    function updatePurgeButtonLabel() {
+      if (!scanData) return;
+      let totalBytes = 0;
+      scanData.categories.forEach(c => {
+        if (selectedCategories.has(c.id)) totalBytes += c.size_bytes;
+      });
+      const gb = (totalBytes / (1024 ** 3)).toFixed(2);
+      const mb = (totalBytes / (1024 * 1024)).toFixed(1);
+      const label = totalBytes >= 1024 * 1024 * 1024 ? `${gb} GB` : `${mb} MB`;
+      document.getElementById("purgeSizeBtn").innerText = label;
+      document.getElementById("purgeBtn").disabled = (totalBytes === 0);
+    }
+
+    function onPurgeCompleted(res) {
+      setStatus(`Purged ${res.freed_mb} MB (${res.freed_gb} GB) on ${res.drive || currentDrive} successfully!`);
+      setTimeout(requestScan, 1200);
+    }
+
+    // =========================================================================
+    // CANVAS CONCENTRIC SUNBURST CHART
+    // =========================================================================
+
+    const canvas = document.getElementById("sunburstCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      drawSunburst();
+    }
+    window.addEventListener("resize", resizeCanvas);
+
+    function drawSunburst() {
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+
+      if (!scanData || !scanData.categories) return;
+
+      const centerX = w / 2;
+      const centerY = h / 2;
+      const maxRadius = Math.min(centerX, centerY) * 0.85;
+      const innerRadius = maxRadius * 0.58;
+
+      // Draw background halo circle
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, maxRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(0, 243, 255, 0.08)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const totalReclaimable = scanData.total_reclaimable_bytes || 1;
+      let startAngle = -Math.PI / 2;
+
+      scanData.categories.forEach(cat => {
+        const sliceAngle = (cat.size_bytes / totalReclaimable) * (Math.PI * 2);
+        const endAngle = startAngle + sliceAngle;
+        const isHovered = (hoveredSlice === cat.id);
+        const isChecked = selectedCategories.has(cat.id);
+        const color = CAT_COLORS[cat.id] || "#00f3ff";
+
+        const outerR = isHovered ? maxRadius + 6 : maxRadius;
+        const innerR = isHovered ? innerRadius - 2 : innerRadius;
+
+        // Draw Sector Arc
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, outerR, startAngle, endAngle);
+        ctx.arc(centerX, centerY, innerR, endAngle, startAngle, true);
+        ctx.closePath();
+
+        if (isChecked) {
+          ctx.fillStyle = isHovered ? color : color + "aa";
+          ctx.shadowColor = color;
+          ctx.shadowBlur = isHovered ? 18 : 6;
+        } else {
+          ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+          ctx.shadowBlur = 0;
+        }
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(7, 9, 14, 0.8)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        cat._startAngle = startAngle;
+        cat._endAngle = endAngle;
+        startAngle = endAngle;
+      });
+
+      ctx.shadowBlur = 0;
+
+      // Draw center core circle
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, innerRadius - 4, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(10, 14, 22, 0.95)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0, 243, 255, 0.25)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      drawParticles();
+    }
+
+    // Canvas Hover Interaction
+    canvas.addEventListener("mousemove", (e) => {
+      if (!scanData || !scanData.categories) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left - (rect.width / 2);
+      const y = e.clientY - rect.top - (rect.height / 2);
+      const dist = Math.sqrt(x * x + y * y);
+      const maxRadius = Math.min(rect.width, rect.height) * 0.42;
+      const innerRadius = maxRadius * 0.58;
+
+      let prevHover = hoveredSlice;
+      hoveredSlice = null;
+
+      if (dist >= innerRadius && dist <= maxRadius + 10) {
+        let angle = Math.atan2(y, x);
+        if (angle < -Math.PI / 2) angle += Math.PI * 2;
+
+        scanData.categories.forEach(cat => {
+          let s = cat._startAngle;
+          let en = cat._endAngle;
+          if (angle >= s && angle <= en) {
+            hoveredSlice = cat.id;
+            document.getElementById("sectorInspectTitle").innerText = `${cat.name.toUpperCase()} : ${cat.size_mb} MB`;
+          }
+        });
+      } else {
+        document.getElementById("sectorInspectTitle").innerText = "HOVER SECTOR TO INSPECT";
+      }
+
+      if (prevHover !== hoveredSlice) {
+        drawSunburst();
+        highlightCategoryInList(hoveredSlice);
+      }
+    });
+
+    function highlightCategoryInList(catId) {
+      document.querySelectorAll(".category-item").forEach(el => el.classList.remove("active"));
+      if (catId) {
+        const item = document.getElementById(`cat-item-${catId}`);
+        if (item) item.classList.add("active");
+      }
+    }
+
+    // Particle Dissolve Animation on Purge
+    function triggerPurgeParticles() {
+      const rect = canvas.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+
+      for (let i = 0; i < 60; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1.5 + Math.random() * 4;
+        particles.push({
+          x: centerX + Math.cos(angle) * 40,
+          y: centerY + Math.sin(angle) * 40,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          alpha: 1.0,
+          color: Math.random() > 0.5 ? "var(--cyan)" : "var(--violet)",
+          radius: 2 + Math.random() * 3
+        });
+      }
+      animateParticles();
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+    }
+
+    function animateParticles() {
+      if (particles.length === 0) return;
+      particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.alpha -= 0.02;
+      });
+      particles = particles.filter(p => p.alpha > 0);
+      drawSunburst();
+      if (particles.length > 0) requestAnimationFrame(animateParticles);
+    }
+
+    // Initial setup on DOM ready
+    window.addEventListener("DOMContentLoaded", () => {
+      resizeCanvas();
+      // Request fresh live scan automatically
+      setTimeout(requestScan, 600);
+    });
+  </script>
+</body>
+</html>

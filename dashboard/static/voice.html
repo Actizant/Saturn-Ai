@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Saturn Live Voice // Advanced Voice Mode</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #060709;
+            --bg-card: rgba(18, 22, 31, 0.7);
+            --border-card: rgba(255, 255, 255, 0.1);
+            --cyan-glow: #00e5ff;
+            --emerald-glow: #10b981;
+            --violet-glow: #8b5cf6;
+            --amber-glow: #f59e0b;
+            --rose-glow: #f43f5e;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Ambient Cosmic Background */
+        .ambient-mesh {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            background: 
+                radial-gradient(circle at 50% 40%, rgba(0, 229, 255, 0.08) 0%, transparent 60%),
+                radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+                radial-gradient(circle at 20% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
+            transition: background 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Top Header Bar */
+        header {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 28px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .brand-badge {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #64748b;
+            box-shadow: 0 0 10px rgba(100, 116, 139, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background: var(--cyan-glow);
+            box-shadow: 0 0 14px var(--cyan-glow);
+        }
+
+        .status-dot.speaking {
+            background: var(--emerald-glow);
+            box-shadow: 0 0 16px var(--emerald-glow);
+        }
+
+        .status-dot.thinking {
+            background: var(--violet-glow);
+            box-shadow: 0 0 14px var(--violet-glow);
+        }
+
+        .status-dot.interrupted {
+            background: var(--amber-glow);
+            box-shadow: 0 0 14px var(--amber-glow);
+        }
+
+        .brand-title {
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: #fff;
+            text-transform: uppercase;
+        }
+
+        .brand-subtitle {
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+        }
+
+        .telemetry-badges {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .metric-pill {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            padding: 4px 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .metric-pill.highlight {
+            color: var(--cyan-glow);
+            border-color: rgba(0, 229, 255, 0.25);
+            background: rgba(0, 229, 255, 0.06);
+        }
+
+        /* Central Visualizer Stage */
+        .stage {
+            position: relative;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+            padding: 10px 20px;
+        }
+
+        #visualizerCanvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Center Content Overlay (Pointers-events through except subtitles) */
+        .stage-center-content {
+            position: relative;
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            width: 100%;
+            max-width: 680px;
+            pointer-events: none;
+            margin-top: 140px; /* Positions below the canvas orb */
+        }
+
+        .voice-state-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--cyan-glow);
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+        }
+
+        /* LIVE SUBTITLE CONTAINER (Directly Below Waveform) */
+        .live-subtitle-container {
+            pointer-events: auto;
+            width: 100%;
+            background: rgba(14, 18, 27, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 20px;
+            padding: 18px 24px;
+            backdrop-filter: blur(28px);
+            -webkit-backdrop-filter: blur(28px);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 229, 255, 0.05);
+            transition: all 0.25s ease;
+            min-height: 90px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        .subtitle-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            padding: 3px 10px;
+            border-radius: 20px;
+            background: rgba(0, 229, 255, 0.1);
+            color: var(--cyan-glow);
+            border: 1px solid rgba(0, 229, 255, 0.2);
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .subtitle-badge.speaking {
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--emerald-glow);
+            border-color: rgba(16, 185, 129, 0.25);
+        }
+
+        .subtitle-badge.thinking {
+            background: rgba(139, 92, 246, 0.12);
+            color: var(--violet-glow);
+            border-color: rgba(139, 92, 246, 0.25);
+        }
+
+        .badge-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 8px currentColor;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
+        }
+
+        .subtitle-text {
+            font-size: 19px;
+            line-height: 1.45;
+            font-weight: 500;
+            color: #ffffff;
+            transition: color 0.15s ease;
+            max-width: 600px;
+            word-wrap: break-word;
+        }
+
+        .subtitle-text.interim {
+            color: #94a3b8;
+            font-style: italic;
+        }
+
+        .subtitle-text.highlight {
+            color: var(--cyan-glow);
+        }
+
+        /* Floating Bottom Controls Island */
+        .controls-island {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding-bottom: 30px;
+        }
+
+        .ctrl-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #fff;
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .ctrl-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: scale(1.06);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
+        .ctrl-btn:active {
+            transform: scale(0.95);
+        }
+
+        .ctrl-btn.primary {
+            width: 66px;
+            height: 66px;
+            background: linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(16, 185, 129, 0.2));
+            border-color: rgba(0, 229, 255, 0.4);
+            box-shadow: 0 0 25px rgba(0, 229, 255, 0.3);
+        }
+
+        .ctrl-btn.primary:hover {
+            box-shadow: 0 0 35px rgba(0, 229, 255, 0.5);
+            background: linear-gradient(135deg, rgba(0, 229, 255, 0.3), rgba(16, 185, 129, 0.3));
+        }
+
+        .ctrl-btn.danger {
+            background: rgba(244, 63, 94, 0.15);
+            border-color: rgba(244, 63, 94, 0.3);
+            color: #fb7185;
+        }
+
+        .ctrl-btn.muted {
+            background: rgba(244, 63, 94, 0.25);
+            border-color: rgba(244, 63, 94, 0.45);
+            color: #fb7185;
+        }
+
+        .ctrl-btn svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+
+        @media (max-width: 640px) {
+            .stage-center-content {
+                margin-top: 100px;
+                padding: 0 10px;
+            }
+            .subtitle-text {
+                font-size: 16px;
+            }
+            .live-subtitle-container {
+                padding: 14px 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-mesh" id="ambientMesh"></div>
+
+    <!-- Header -->
+    <header>
+        <div class="brand-badge">
+            <div class="status-dot" id="statusDot"></div>
+            <div>
+                <div class="brand-title">Saturn Live Voice</div>
+                <div class="brand-subtitle">Bidirectional Neural Duplex</div>
+            </div>
+        </div>
+
+        <div class="telemetry-badges">
+            <div class="metric-pill highlight" id="latencyPill">
+                <span style="font-size: 9px;">⚡</span>
+                <span id="latencyVal">Live</span>
+            </div>
+            <div class="metric-pill">
+                <span>16k In / 24k Out</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Visualizer Canvas Stage -->
+    <main class="stage">
+        <canvas id="visualizerCanvas"></canvas>
+
+        <div class="stage-center-content">
+            <div class="voice-state-label" id="stateLabel">LISTENING</div>
+
+            <!-- LIVE SUBTITLES DIRECTLY BELOW WAVEFORM -->
+            <div class="live-subtitle-container" id="subtitleContainer">
+                <div class="subtitle-badge" id="subtitleBadge">
+                    <span class="badge-dot"></span>
+                    <span id="badgeSpeaker">LISTENING</span>
+                </div>
+                <div class="subtitle-text" id="subtitleText">
+                    Listening to you... Say "Hello" or "Open Chrome"
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bottom Controls Island -->
+    <footer class="controls-island">
+        <!-- Mute Button -->
+        <button class="ctrl-btn" id="muteBtn" title="Mute Microphone">
+            <svg viewBox="0 0 24 24" id="micIcon">
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+            </svg>
+        </button>
+
+        <!-- Primary Barge-In / Interrupt Button -->
+        <button class="ctrl-btn primary" id="interruptBtn" title="Barge-In / Interrupt AI">
+            <svg viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+            </svg>
+        </button>
+
+        <!-- Exit / Hang Up Button -->
+        <button class="ctrl-btn danger" id="hangupBtn" title="Disconnect Session">
+            <svg viewBox="0 0 24 24">
+                <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+            </svg>
+        </button>
+    </footer>
+
+    <script>
+        // ── State Variables ──────────────────────────────────────────────────
+        let ws = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let processorNode = null;
+        let speechRecognizer = null;
+        let isMuted = false;
+        let isConnected = false;
+        let currentState = "IDLE";
+
+        // Visualizer Amplitudes
+        let userLevel = 0.0;
+        let aiLevel = 0.0;
+        let smoothedLevel = 0.0;
+
+        // Gapless Audio Playback Queue
+        let nextPlayTime = 0.0;
+        let activeSources = [];
+
+        // DOM Elements
+        const canvas = document.getElementById("visualizerCanvas");
+        const ctx = canvas.getContext("2d");
+        const statusDot = document.getElementById("statusDot");
+        const stateLabel = document.getElementById("stateLabel");
+        const subtitleBadge = document.getElementById("subtitleBadge");
+        const badgeSpeaker = document.getElementById("badgeSpeaker");
+        const subtitleText = document.getElementById("subtitleText");
+        const latencyVal = document.getElementById("latencyVal");
+        const muteBtn = document.getElementById("muteBtn");
+        const interruptBtn = document.getElementById("interruptBtn");
+        const hangupBtn = document.getElementById("hangupBtn");
+        const ambientMesh = document.getElementById("ambientMesh");
+
+        // ── Canvas Setup ─────────────────────────────────────────────────────
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * window.devicePixelRatio;
+            canvas.height = window.innerHeight * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+        window.addEventListener("resize", resizeCanvas);
+        resizeCanvas();
+
+        // ── State Presentation Updates ───────────────────────────────────────
+        function updateStateUI(state) {
+            currentState = state.toUpperCase();
+            stateLabel.textContent = currentState;
+            statusDot.className = "status-dot " + state.toLowerCase();
+
+            switch (currentState) {
+                case "LISTENING":
+                    stateLabel.style.color = "var(--cyan-glow)";
+                    ambientMesh.style.background = "radial-gradient(circle at 50% 35%, rgba(0, 229, 255, 0.12) 0%, transparent 60%)";
+                    break;
+                case "THINKING":
+                    stateLabel.style.color = "var(--violet-glow)";
+                    ambientMesh.style.background = "radial-gradient(circle at 50% 35%, rgba(139, 92, 246, 0.14) 0%, transparent 60%)";
+                    badgeSpeaker.textContent = "THINKING...";
+                    subtitleBadge.className = "subtitle-badge thinking";
+                    break;
+                case "SPEAKING":
+                    stateLabel.style.color = "var(--emerald-glow)";
+                    ambientMesh.style.background = "radial-gradient(circle at 50% 35%, rgba(16, 185, 129, 0.14) 0%, transparent 60%)";
+                    badgeSpeaker.textContent = "SATURN";
+                    subtitleBadge.className = "subtitle-badge speaking";
+                    break;
+                case "INTERRUPTED":
+                    stateLabel.style.color = "var(--amber-glow)";
+                    ambientMesh.style.background = "radial-gradient(circle at 50% 35%, rgba(245, 158, 11, 0.15) 0%, transparent 60%)";
+                    badgeSpeaker.textContent = "INTERRUPTED";
+                    subtitleBadge.className = "subtitle-badge";
+                    break;
+                case "CONNECTING":
+                    stateLabel.style.color = "#94a3b8";
+                    badgeSpeaker.textContent = "CONNECTING...";
+                    subtitleText.textContent = "Establishing live duplex connection...";
+                    break;
+            }
+        }
+
+        // ── Subtitle Presentation ────────────────────────────────────────────
+        function setSubtitles(speaker, text, isInterim = false) {
+            badgeSpeaker.textContent = speaker.toUpperCase();
+            if (speaker.toUpperCase() === "YOU") {
+                subtitleBadge.className = "subtitle-badge";
+            } else if (speaker.toUpperCase() === "SATURN") {
+                subtitleBadge.className = "subtitle-badge speaking";
+            }
+
+            subtitleText.textContent = text;
+            if (isInterim) {
+                subtitleText.classList.add("interim");
+            } else {
+                subtitleText.classList.remove("interim");
+            }
+        }
+
+        // ── Instant Interruption (Barge-In) ──────────────────────────────────
+        function triggerBargeIn() {
+            // Immediately stop all scheduled audio buffers
+            for (let src of activeSources) {
+                try { src.stop(); } catch (e) {}
+            }
+            activeSources = [];
+            if (audioContext) {
+                nextPlayTime = audioContext.currentTime;
+            }
+
+            // Send instant interrupt control frame to server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "interrupt", timestamp: Date.now() }));
+            }
+
+            shockwaveRadius = 60;
+            updateStateUI("INTERRUPTED");
+            setSubtitles("YOU", "Listening to your new input...", true);
+        }
+
+        // ── High-Precision Audio Downsampler (e.g. 48kHz -> 16kHz) ────────────
+        function downsampleBuffer(buffer, inputSampleRate, outputSampleRate = 16000) {
+            if (inputSampleRate === outputSampleRate) {
+                const pcm16 = new Int16Array(buffer.length);
+                for (let i = 0; i < buffer.length; i++) {
+                    let s = Math.max(-1, Math.min(1, buffer[i]));
+                    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                return pcm16;
+            }
+            const sampleRateRatio = inputSampleRate / outputSampleRate;
+            const newLength = Math.round(buffer.length / sampleRateRatio);
+            const result = new Int16Array(newLength);
+            let offsetResult = 0;
+            let offsetBuffer = 0;
+            while (offsetResult < result.length) {
+                const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+                let accum = 0, count = 0;
+                for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                    accum += buffer[i];
+                    count++;
+                }
+                const sample = count > 0 ? accum / count : buffer[offsetBuffer];
+                const s = Math.max(-1, Math.min(1, sample));
+                result[offsetResult] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                offsetResult++;
+                offsetBuffer = nextOffsetBuffer;
+            }
+            return result;
+        }
+
+        // ── Audio Engine & Downsampling Pipeline ─────────────────────────────
+        async function initAudio() {
+            if (audioContext) return;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                latencyHint: "interactive"
+            });
+            nextPlayTime = audioContext.currentTime;
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                // ScriptProcessorNode to buffer frames
+                processorNode = audioContext.createScriptProcessor(1024, 1, 1);
+
+                processorNode.onaudioprocess = (e) => {
+                    if (isMuted || !isConnected) return;
+                    const inputData = e.inputBuffer.getChannelData(0);
+
+                    // Compute User Audio Level
+                    let sum = 0;
+                    for (let i = 0; i < inputData.length; i++) {
+                        sum += inputData[i] * inputData[i];
+                    }
+                    userLevel = Math.min(1.0, Math.sqrt(sum / inputData.length) * 4.5);
+
+                    // If user speaks loudly while AI is speaking, trigger barge-in instantly
+                    if (userLevel > 0.20 && currentState === "SPEAKING") {
+                        triggerBargeIn();
+                    }
+
+                    // Accurately downsample from audioContext.sampleRate (e.g. 48kHz) down to exact 16kHz PCM
+                    const pcm16 = downsampleBuffer(inputData, audioContext.sampleRate, 16000);
+
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(pcm16.buffer);
+                    }
+                };
+
+                source.connect(processorNode);
+                processorNode.connect(audioContext.destination);
+
+                initLiveSpeechRecognition();
+
+            } catch (err) {
+                console.error("Microphone access error:", err);
+                subtitleText.textContent = "Microphone access denied: " + err.message;
+            }
+        }
+
+        // ── Continuous Browser Speech Recognition for 0ms Live Subtitles ─────
+        function initLiveSpeechRecognition() {
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRec) {
+                console.log("Web Speech API not supported; using backend transcription.");
+                return;
+            }
+
+            speechRecognizer = new SpeechRec();
+            speechRecognizer.continuous = true;
+            speechRecognizer.interimResults = true;
+            speechRecognizer.lang = "en-US";
+
+            speechRecognizer.onresult = (event) => {
+                if (isMuted) return;
+                let interimTranscript = "";
+                let finalTranscript = "";
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const trans = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += trans;
+                    } else {
+                        interimTranscript += trans;
+                    }
+                }
+
+                if (interimTranscript) {
+                    setSubtitles("YOU", interimTranscript, true);
+                    if (currentState === "SPEAKING") {
+                        triggerBargeIn();
+                    }
+                }
+
+                if (finalTranscript) {
+                    const textClean = finalTranscript.trim();
+                    if (textClean) {
+                        setSubtitles("YOU", `"${textClean}"`, false);
+                        updateStateUI("THINKING");
+
+                        // Transmit recognized speech text over WebSocket for fast action execution
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: "user_speech",
+                                text: textClean,
+                                timestamp: Date.now()
+                            }));
+                        }
+                    }
+                }
+            };
+
+            speechRecognizer.onerror = (e) => {
+                // Ignore harmless no-speech / aborted errors
+                if (e.error !== "no-speech" && e.error !== "aborted") {
+                    console.log("Speech recognition error:", e.error);
+                }
+            };
+
+            speechRecognizer.onend = () => {
+                // Continuously restart recognition for hands-free persistence
+                if (isConnected && !isMuted) {
+                    try { speechRecognizer.start(); } catch (err) {}
+                }
+            };
+
+            try {
+                speechRecognizer.start();
+            } catch (e) {
+                console.log("Could not auto-start speech recognition:", e);
+            }
+        }
+
+        // ── Gapless Playback of 24kHz PCM Chunks ─────────────────────────────
+        function playPcmChunk(arrayBuffer) {
+            if (!audioContext) return;
+            const int16Array = new Int16Array(arrayBuffer);
+            const floatArray = new Float32Array(int16Array.length);
+
+            let sum = 0;
+            for (let i = 0; i < int16Array.length; i++) {
+                floatArray[i] = int16Array[i] / 32768.0;
+                sum += floatArray[i] * floatArray[i];
+            }
+            aiLevel = Math.min(1.0, Math.sqrt(sum / floatArray.length) * 3.5);
+
+            const buffer = audioContext.createBuffer(1, floatArray.length, 24000);
+            buffer.getChannelData(0).set(floatArray);
+
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+
+            const now = audioContext.currentTime;
+            if (nextPlayTime < now) {
+                nextPlayTime = now + 0.015;
+            }
+
+            source.start(nextPlayTime);
+            nextPlayTime += buffer.duration;
+
+            activeSources.push(source);
+            source.onended = () => {
+                const idx = activeSources.indexOf(source);
+                if (idx !== -1) activeSources.splice(idx, 1);
+            };
+        }
+
+        // ── WebSocket Live Connection ────────────────────────────────────────
+        function connectLiveVoice() {
+            const loc = window.location;
+            const protocol = loc.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${loc.host}/ws/live-voice`;
+
+            updateStateUI("CONNECTING");
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = "arraybuffer";
+
+            ws.onopen = async () => {
+                isConnected = true;
+                await initAudio();
+                updateStateUI("LISTENING");
+                setSubtitles("SYSTEM", "Live duplex online. Speak naturally without buttons.");
+            };
+
+            ws.onmessage = (event) => {
+                if (typeof event.data === "string") {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        handleControlMessage(msg);
+                    } catch (e) {
+                        console.error("JSON parse error:", e);
+                    }
+                } else if (event.data instanceof ArrayBuffer) {
+                    playPcmChunk(event.data);
+                }
+            };
+
+            ws.onclose = () => {
+                isConnected = false;
+                updateStateUI("IDLE");
+                setSubtitles("SYSTEM", "Reconnecting to live voice engine...");
+                setTimeout(connectLiveVoice, 2000);
+            };
+
+            ws.onerror = (err) => {
+                console.error("WebSocket error:", err);
+            };
+        }
+
+        function handleControlMessage(msg) {
+            if (msg.type === "state") {
+                updateStateUI(msg.state);
+            } else if (msg.type === "interrupt") {
+                triggerBargeIn();
+            } else if (msg.type === "metrics") {
+                if (msg.latency_ms) {
+                    latencyVal.textContent = msg.latency_ms + " ms";
+                }
+            } else if (msg.type === "transcript") {
+                const roleName = msg.role === "user" ? "YOU" : "SATURN";
+                setSubtitles(roleName, msg.text, msg.interim);
+            }
+        }
+
+        // ── Button Handlers ──────────────────────────────────────────────────
+        muteBtn.addEventListener("click", () => {
+            isMuted = !isMuted;
+            muteBtn.classList.toggle("muted", isMuted);
+            muteBtn.title = isMuted ? "Unmute Microphone" : "Mute Microphone";
+            if (isMuted) {
+                setSubtitles("SYSTEM", "Microphone muted.");
+            } else {
+                setSubtitles("SYSTEM", "Microphone unmuted.");
+                if (speechRecognizer) {
+                    try { speechRecognizer.start(); } catch (e) {}
+                }
+            }
+        });
+
+        interruptBtn.addEventListener("click", () => {
+            triggerBargeIn();
+        });
+
+        hangupBtn.addEventListener("click", () => {
+            if (ws) ws.close();
+            window.location.href = "/";
+        });
+
+        // ── Organic Canvas Fluid Orb Visualizer ──────────────────────────────
+        let time = 0;
+        let shockwaveRadius = 0;
+
+        function renderVisualizer() {
+            requestAnimationFrame(renderVisualizer);
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const centerX = width / 2;
+            const centerY = height / 2 - 90; // Orb sits higher, leaves space for subtitles below
+
+            ctx.clearRect(0, 0, width, height);
+
+            time += 0.025;
+
+            // Target level based on active speaker
+            let targetLevel = currentState === "SPEAKING" ? aiLevel : userLevel;
+            smoothedLevel += (targetLevel - smoothedLevel) * 0.18;
+
+            const baseRadius = 78 + smoothedLevel * 70;
+
+            // Shockwave rendering on interruption
+            if (shockwaveRadius > 0) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, shockwaveRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(245, 158, 11, ${Math.max(0, 1 - shockwaveRadius / 260)})`;
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                shockwaveRadius += 7;
+                if (shockwaveRadius > 260) shockwaveRadius = 0;
+            }
+
+            // Radial Harmonic Orb Waves
+            const points = 64;
+            const numRings = 3;
+
+            for (let ring = 0; ring < numRings; ring++) {
+                ctx.beginPath();
+                const ringOffset = ring * 12;
+
+                for (let i = 0; i <= points; i++) {
+                    const angle = (i / points) * Math.PI * 2;
+                    const harmonic1 = Math.sin(angle * 3 + time * (1.5 + ring * 0.5));
+                    const harmonic2 = Math.cos(angle * 5 - time * 2);
+                    const displacement = (harmonic1 + harmonic2) * (10 + smoothedLevel * 30);
+
+                    const r = baseRadius + displacement + ringOffset;
+                    const x = centerX + Math.cos(angle) * r;
+                    const y = centerY + Math.sin(angle) * r;
+
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.closePath();
+
+                let strokeColor = "rgba(0, 229, 255, 0.45)";
+                let fillColor = "rgba(0, 229, 255, 0.06)";
+
+                if (currentState === "SPEAKING") {
+                    strokeColor = `rgba(16, 185, 129, ${0.45 - ring * 0.1})`;
+                    fillColor = `rgba(16, 185, 129, ${0.12 - ring * 0.03})`;
+                } else if (currentState === "THINKING") {
+                    strokeColor = `rgba(139, 92, 246, ${0.48 - ring * 0.1})`;
+                    fillColor = `rgba(139, 92, 246, ${0.08 - ring * 0.02})`;
+                } else if (currentState === "INTERRUPTED") {
+                    strokeColor = `rgba(245, 158, 11, ${0.5 - ring * 0.1})`;
+                    fillColor = `rgba(245, 158, 11, ${0.1 - ring * 0.03})`;
+                }
+
+                ctx.fillStyle = fillColor;
+                ctx.fill();
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = 2.0;
+                ctx.stroke();
+            }
+
+            // Central Core Glowing Sphere
+            const coreGradient = ctx.createRadialGradient(centerX, centerY, 5, centerX, centerY, baseRadius * 0.7);
+            if (currentState === "SPEAKING") {
+                coreGradient.addColorStop(0, "rgba(16, 185, 129, 0.7)");
+                coreGradient.addColorStop(1, "rgba(6, 182, 212, 0.0)");
+            } else if (currentState === "THINKING") {
+                coreGradient.addColorStop(0, "rgba(139, 92, 246, 0.65)");
+                coreGradient.addColorStop(1, "rgba(99, 102, 241, 0.0)");
+            } else if (currentState === "INTERRUPTED") {
+                coreGradient.addColorStop(0, "rgba(245, 158, 11, 0.65)");
+                coreGradient.addColorStop(1, "rgba(239, 68, 68, 0.0)");
+            } else {
+                coreGradient.addColorStop(0, "rgba(0, 229, 255, 0.6)");
+                coreGradient.addColorStop(1, "rgba(0, 229, 255, 0.0)");
+            }
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, baseRadius * 0.7, 0, Math.PI * 2);
+            ctx.fillStyle = coreGradient;
+            ctx.fill();
+        }
+
+        renderVisualizer();
+
+        // ── Auto-Start On Load / Click ───────────────────────────────────────
+        window.addEventListener("load", () => {
+            connectLiveVoice();
+        });
+
+        document.body.addEventListener("click", () => {
+            if (audioContext && audioContext.state === "suspended") {
+                audioContext.resume();
+            }
+        }, { once: true });
+    </script>
+</body>
+</html>

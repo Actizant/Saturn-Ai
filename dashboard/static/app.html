@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Saturn Remote</title>
+  <script src="/static/crypto.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --bg: #030712;
+      --surface: rgba(255, 255, 255, 0.04);
+      --surface-card: rgba(15, 23, 42, 0.7);
+      --border: rgba(255, 255, 255, 0.1);
+      --accent: #00e5ff;
+      --accent-glow: rgba(0, 229, 255, 0.25);
+      --accent-blue: #38bdf8;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --danger: #f87171;
+      --success: #34d399;
+    }
+    html, body {
+      height: 100%; width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── TOP HEADER ── */
+    header {
+      flex: 0 0 auto;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(3, 7, 18, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      z-index: 50;
+    }
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-logo {
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      color: #fff;
+    }
+    .brand-logo span { color: var(--accent); }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .status-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #e2e8f0;
+    }
+    .status-badge.online .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .status-badge.offline .dot { background: var(--danger); }
+    .status-badge.connecting .dot { background: #fbbf24; }
+
+    /* ── MAIN VIEW CONTAINER ── */
+    main {
+      flex: 1 1 auto;
+      position: relative;
+      overflow: hidden;
+    }
+    .tab-view {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: none;
+      flex-direction: column;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 16px;
+    }
+    .tab-view.active {
+      display: flex;
+    }
+
+    /* ── BOTTOM NAV BAR ── */
+    nav.bottom-nav {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: rgba(10, 15, 29, 0.95);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border);
+      padding: 8px 10px;
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
+      z-index: 50;
+    }
+    .nav-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 6px 0;
+      border-radius: 12px;
+      transition: all 0.2s ease;
+    }
+    .nav-btn .icon {
+      font-size: 20px;
+      line-height: 1;
+    }
+    .nav-btn .label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .nav-btn.active {
+      color: var(--accent);
+      background: rgba(0, 229, 255, 0.08);
+    }
+
+    /* ── TAB 1: TRACKPAD ── */
+    #view-trackpad {
+      padding: 12px;
+      gap: 12px;
+    }
+    .trackpad-card {
+      flex: 1 1 auto;
+      display: flex;
+      position: relative;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(0, 229, 255, 0.2);
+      border-radius: 20px;
+      overflow: hidden;
+      touch-action: none;
+      box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+    }
+    #trackpad-surface {
+      flex: 1 1 auto;
+      height: 100%;
+      touch-action: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 255, 255, 0.25);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      user-select: none;
+    }
+    #trackpad-surface .hint {
+      pointer-events: none;
+      text-align: center;
+      line-height: 1.6;
+    }
+    #scroll-strip {
+      width: 48px;
+      background: rgba(0, 229, 255, 0.05);
+      border-left: 1px dashed rgba(0, 229, 255, 0.2);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 0;
+      color: var(--muted);
+      font-size: 14px;
+      touch-action: none;
+      user-select: none;
+    }
+    .mouse-btns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+    .btn-mouse {
+      padding: 14px;
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn-mouse:active {
+      background: rgba(0, 229, 255, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .type-bar {
+      display: flex;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+    .type-input {
+      flex: 1;
+      padding: 12px 14px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .type-input:focus { border-color: var(--accent); }
+    .btn-type {
+      padding: 0 16px;
+      background: var(--accent);
+      color: #030712;
+      border: none;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    /* ── TAB 2: MEDIA & SYSTEM ── */
+    #view-media {
+      gap: 18px;
+    }
+    .section-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-title span { color: var(--accent); }
+    .media-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .media-btn {
+      padding: 16px 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .media-btn .icon { font-size: 20px; }
+    .media-btn:active {
+      background: rgba(0, 229, 255, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: scale(0.97);
+    }
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .action-btn {
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: all 0.15s ease;
+    }
+    .action-btn:active {
+      background: rgba(0, 229, 255, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ── TAB 3: CHAT & VOICE ── */
+    #view-chat {
+      padding: 12px;
+      gap: 12px;
+    }
+    #feed {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-right: 4px;
+      min-height: 120px;
+    }
+    .chat-bubble {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .chat-bubble.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #0099ff, #00e5ff);
+      color: #030712;
+      font-weight: 600;
+      border-bottom-right-radius: 4px;
+    }
+    .chat-bubble.saturn {
+      align-self: flex-start;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border);
+      color: #f1f5f9;
+      border-bottom-left-radius: 4px;
+    }
+    .chat-bubble.sys {
+      align-self: center;
+      background: rgba(0, 229, 255, 0.08);
+      border: 1px solid rgba(0, 229, 255, 0.2);
+      color: #7dd3fc;
+      font-size: 11px;
+      text-align: center;
+      padding: 6px 14px;
+      border-radius: 999px;
+    }
+    .quick-prompts {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      flex: 0 0 auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .quick-prompts::-webkit-scrollbar { display: none; }
+    .chip {
+      white-space: nowrap;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .chip:active { background: rgba(0, 229, 255, 0.15); color: #fff; }
+    .chat-input-bar {
+      display: flex;
+      gap: 8px;
+      flex: 0 0 auto;
+      align-items: center;
+    }
+    #chat-inp {
+      flex: 1;
+      padding: 12px 14px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    #chat-inp:focus { border-color: var(--accent); }
+    .btn-voice {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border);
+      color: #fff;
+      font-size: 18px;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+    }
+    .btn-voice.listening {
+      background: var(--danger);
+      box-shadow: 0 0 16px rgba(248, 113, 113, 0.5);
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+    .btn-send-chat {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      background: var(--accent);
+      color: #030712;
+      border: none;
+      font-size: 16px;
+      font-weight: bold;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+    }
+    .btn-wake-sm {
+      padding: 0 12px;
+      height: 44px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+    }
+
+    /* ── TAB 4: FILES ── */
+    #view-files {
+      gap: 14px;
+    }
+    .upload-box {
+      border: 2px dashed rgba(0, 229, 255, 0.3);
+      background: rgba(0, 229, 255, 0.03);
+      border-radius: 20px;
+      padding: 24px 16px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .upload-box .icon { font-size: 32px; color: var(--accent); }
+    .upload-box .text { font-size: 13px; font-weight: 600; color: #fff; }
+    .upload-box .subtext { font-size: 11px; color: var(--muted); }
+    .files-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .file-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      gap: 10px;
+    }
+    .file-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      overflow: hidden;
+    }
+    .file-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-size { font-size: 11px; color: var(--muted); }
+    .btn-download {
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: rgba(0, 229, 255, 0.12);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    /* ── TOAST NOTIFICATION ── */
+    #toast {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-20px);
+      padding: 10px 18px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid var(--accent);
+      box-shadow: 0 0 20px var(--accent-glow);
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s ease;
+      z-index: 100;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div id="toast"></div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand-wrap">
+      <div class="brand-logo">⚡ SATURN</div>
+    </div>
+    <div id="status-badge" class="status-badge connecting">
+      <span class="dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </header>
+
+  <!-- Views -->
+  <main>
+    <!-- TAB 1: TRACKPAD -->
+    <div id="view-trackpad" class="tab-view active">
+      <div class="trackpad-card">
+        <div id="trackpad-surface">
+          <div class="hint">
+            <div>🖱️ Touch & Drag</div>
+            <div style="font-size:10px; color: rgba(255,255,255,0.4); margin-top:4px;">Tap = Left Click • Double Tap = Double Click</div>
+          </div>
+        </div>
+        <div id="scroll-strip">
+          <span>▲</span>
+          <span style="font-size:10px; transform:rotate(-90deg);">SCROLL</span>
+          <span>▼</span>
+        </div>
+      </div>
+      <div class="mouse-btns">
+        <button class="btn-mouse" onclick="sendMouseClick('left')">🖱️ Left Click</button>
+        <button class="btn-mouse" onclick="sendMouseClick('right')">🖱️ Right Click</button>
+      </div>
+      <div class="type-bar">
+        <input id="type-inp" class="type-input" placeholder="Type text to PC keyboard..." autocomplete="off">
+        <button class="btn-type" onclick="sendTypeText()">SEND</button>
+      </div>
+    </div>
+
+    <!-- TAB 2: MEDIA & SYSTEM -->
+    <div id="view-media" class="tab-view">
+      <div class="section-card">
+        <div class="card-title"><span>⏯️</span> Media Playback</div>
+        <div class="media-grid">
+          <button class="media-btn" onclick="sendMedia('prev')"><span class="icon">⏮️</span>Prev Track</button>
+          <button class="media-btn" onclick="sendMedia('playpause')"><span class="icon">⏯️</span>Play / Pause</button>
+          <button class="media-btn" onclick="sendMedia('next')"><span class="icon">⏭️</span>Next Track</button>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="card-title"><span>🔊</span> System Audio</div>
+        <div class="media-grid">
+          <button class="media-btn" onclick="sendMedia('volume_down')"><span class="icon">🔉</span>Vol Down</button>
+          <button class="media-btn" onclick="sendMedia('mute')"><span class="icon">🔇</span>Mute</button>
+          <button class="media-btn" onclick="sendMedia('volume_up')"><span class="icon">🔊</span>Vol Up</button>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="card-title"><span>⚡</span> Quick PC Actions</div>
+        <div class="actions-grid">
+          <button class="action-btn" onclick="sendSystem('lock')">🔒 Lock PC</button>
+          <button class="action-btn" onclick="sendSystem('screenshot')">📸 Screenshot</button>
+          <button class="action-btn" onclick="sendSystem('desktop')">🖥️ Show Desktop</button>
+          <button class="action-btn" onclick="sendSystem('browser')">🌐 Open Browser</button>
+          <button class="action-btn" onclick="sendSystem('taskmgr')">📊 Task Manager</button>
+          <button class="action-btn" onclick="doWake()">⚡ Wake Saturn</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: CHAT & VOICE -->
+    <div id="view-chat" class="tab-view">
+      <div id="feed">
+        <div class="chat-bubble sys">Remote connection to Saturn established.</div>
+      </div>
+
+      <div class="quick-prompts">
+        <div class="chip" style="background: linear-gradient(135deg, rgba(0,229,255,0.25), rgba(16,185,129,0.25)); border-color: rgba(0,229,255,0.5); color: #00e5ff; font-weight: 600;" onclick="window.open('/voice', '_blank')">⚡ Live Voice Mode</div>
+        <div class="chip" onclick="sendQuick('What are you doing?')">What are you doing?</div>
+        <div class="chip" onclick="sendQuick('Take a screenshot')">Take a screenshot</div>
+        <div class="chip" onclick="sendQuick('Show desktop')">Show desktop</div>
+        <div class="chip" onclick="sendQuick('Check system specs')">System status</div>
+      </div>
+
+      <div class="chat-input-bar">
+        <button class="btn-wake-sm" onclick="doWake()">WAKE</button>
+        <button id="mic-btn" class="btn-voice" onclick="toggleVoiceDictation()" title="Voice Dictation">🎤</button>
+        <input id="chat-inp" placeholder="Message Saturn..." autocomplete="off">
+        <button class="btn-send-chat" onclick="sendChatMessage()">➔</button>
+      </div>
+    </div>
+
+    <!-- TAB 4: FILES -->
+    <div id="view-files" class="tab-view">
+      <label class="upload-box" for="file-upload-input">
+        <div class="icon">📤</div>
+        <div class="text">Tap to Send Files to PC</div>
+        <div class="subtext">Photos, videos, and documents will be saved to your PC's Saturn Uploads folder.</div>
+        <input type="file" id="file-upload-input" multiple style="display:none;" onchange="handleFileUpload(this)">
+      </label>
+
+      <div class="section-card">
+        <div class="card-title"><span>📂</span> Transferred Files</div>
+        <div id="files-list" class="files-list">
+          <div style="font-size:12px; color:var(--muted); text-align:center; padding:10px;">Loading files...</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" onclick="switchTab('trackpad')">
+      <span class="icon">🖱️</span>
+      <span class="label">Touchpad</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('media')">
+      <span class="icon">⏯️</span>
+      <span class="label">Media</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('chat')">
+      <span class="icon">💬</span>
+      <span class="label">Saturn</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('files')">
+      <span class="icon">📁</span>
+      <span class="label">Files</span>
+    </button>
+  </nav>
+
+  <script>
+    // ── Authentication & Security ──────────────────────────────────────────
+    const _authToken  = sessionStorage.getItem('saturn_token');
+    const _sessionKey = sessionStorage.getItem('saturn_key');
+
+    if (!_authToken) {
+      location.replace('/login');
+    }
+
+    function _authHeader() { return { 'Authorization': `Bearer ${_authToken}`, 'Content-Type': 'application/json' }; }
+    function _authFetch(url, opts = {}) {
+      opts.headers = Object.assign({}, opts.headers, _authHeader());
+      return fetch(url, opts);
+    }
+
+    // Fixed AES Salt matching server.py
+    const _AES_SALT = 'SATURN-DASHBOARD-v1';
+    let _aesKey = null;
+
+    function _initCrypto(key) {
+      if (typeof CryptoJS === 'undefined') return false;
+      _aesKey = CryptoJS.SHA256(key + _AES_SALT);
+      return true;
+    }
+
+    function _encrypt(plaintext) {
+      if (!_aesKey || typeof CryptoJS === 'undefined') return null;
+      try {
+        const iv  = CryptoJS.lib.WordArray.random(16);
+        const enc = CryptoJS.AES.encrypt(
+          CryptoJS.enc.Utf8.parse(plaintext), _aesKey,
+          { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+        );
+        const ivHex = iv.toString(CryptoJS.enc.Hex);
+        const ctHex = enc.ciphertext.toString(CryptoJS.enc.Hex);
+        const hex   = ivHex + ctHex;
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < bytes.length; i++)
+          bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+        return btoa(String.fromCharCode(...bytes));
+      } catch { return null; }
+    }
+
+    if (_sessionKey) _initCrypto(_sessionKey);
+
+    // ── Toast Utility ──────────────────────────────────────────────────────
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2200);
+    }
+
+    // ── Tab Navigation ─────────────────────────────────────────────────────
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+      const targetView = document.getElementById(`view-${tabId}`);
+      if (targetView) targetView.classList.add('active');
+
+      const tabs = ['trackpad', 'media', 'chat', 'files'];
+      const idx = tabs.indexOf(tabId);
+      if (idx !== -1) {
+        document.querySelectorAll('.nav-btn')[idx].classList.add('active');
+      }
+
+      if (tabId === 'files') loadFiles();
+    }
+
+    // ── WebSocket Connection Management ────────────────────────────────────
+    let ws = null;
+    let reconnectTimer = null;
+
+    function initWebSocket() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      updateStatus('connecting', 'Connecting...');
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const wsUrl = `${proto}://${location.host}/ws?token=${encodeURIComponent(_authToken)}`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          updateStatus('online', 'Connected');
+          toast('Connected to Saturn');
+          if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+        };
+
+        ws.onclose = () => {
+          updateStatus('offline', 'Disconnected');
+          scheduleReconnect();
+        };
+
+        ws.onerror = () => {
+          updateStatus('offline', 'Error');
+          scheduleReconnect();
+        };
+
+        ws.onmessage = (e) => {
+          try {
+            const m = JSON.parse(e.data);
+            if (m.type === 'log') appendChat(m.speaker || 'Saturn', m.text);
+            else if (m.type === 'sys') appendSys(m.text);
+            else if (m.type === 'file_received') {
+              toast(`Received: ${m.name}`);
+              loadFiles();
+            }
+          } catch (err) {}
+        };
+      } catch (err) {
+        updateStatus('offline', 'Connection failed');
+        scheduleReconnect();
+      }
+    }
+
+    function scheduleReconnect() {
+      if (!reconnectTimer) {
+        reconnectTimer = setInterval(() => {
+          if (!ws || ws.readyState === WebSocket.CLOSED) {
+            initWebSocket();
+          }
+        }, 3000);
+      }
+    }
+
+    // Auto-reconnect when screen wakes up or tab is foregrounded
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        initWebSocket();
+      }
+    });
+    window.addEventListener('focus', initWebSocket);
+
+    function updateStatus(state, text) {
+      const badge = document.getElementById('status-badge');
+      const label = document.getElementById('status-text');
+      badge.className = `status-badge ${state}`;
+      label.textContent = text;
+    }
+
+    function wsSend(payload) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+        return true;
+      }
+      return false;
+    }
+
+    // ── Trackpad & Mouse Control ───────────────────────────────────────────
+    const surface = document.getElementById('trackpad-surface');
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+    let touchStartTime = 0;
+    let totalMovement = 0;
+
+    surface.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        lastTouchX = e.touches[0].clientX;
+        lastTouchY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+        totalMovement = 0;
+      }
+    }, { passive: false });
+
+    surface.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (e.touches.length === 1) {
+        const cx = e.touches[0].clientX;
+        const cy = e.touches[0].clientY;
+        const dx = (cx - lastTouchX) * 1.5;
+        const dy = (cy - lastTouchY) * 1.5;
+        totalMovement += Math.abs(dx) + Math.abs(dy);
+        lastTouchX = cx;
+        lastTouchY = cy;
+
+        wsSend({ type: 'mouse_move', dx: Math.round(dx), dy: Math.round(dy) });
+      }
+    }, { passive: false });
+
+    surface.addEventListener('touchend', (e) => {
+      const duration = Date.now() - touchStartTime;
+      if (duration < 240 && totalMovement < 8) {
+        sendMouseClick('left');
+      }
+    }, { passive: false });
+
+    // Scroll strip
+    const scrollStrip = document.getElementById('scroll-strip');
+    let lastScrollY = 0;
+
+    scrollStrip.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 0) {
+        lastScrollY = e.touches[0].clientY;
+      }
+    }, { passive: false });
+
+    scrollStrip.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (e.touches.length > 0) {
+        const cy = e.touches[0].clientY;
+        const dy = lastScrollY - cy;
+        lastScrollY = cy;
+        if (Math.abs(dy) > 3) {
+          const scrollUnits = dy > 0 ? 80 : -80;
+          wsSend({ type: 'mouse_scroll', dy: scrollUnits });
+        }
+      }
+    }, { passive: false });
+
+    function sendMouseClick(btn) {
+      if (!wsSend({ type: 'mouse_click', button: btn })) {
+        _authFetch('/api/action', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'mouse_click', button: btn })
+        });
+      }
+    }
+
+    function sendTypeText() {
+      const inp = document.getElementById('type-inp');
+      const text = inp.value.trim();
+      if (!text) return;
+      if (!wsSend({ type: 'type_text', text: text })) {
+        _authFetch('/api/action', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'type_text', text: text })
+        });
+      }
+      toast(`Typed: "${text.substring(0, 15)}..."`);
+      inp.value = '';
+    }
+
+    document.getElementById('type-inp').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendTypeText();
+    });
+
+    // ── Media & System Actions ─────────────────────────────────────────────
+    function sendMedia(action) {
+      if (!wsSend({ type: 'media', action: action })) {
+        _authFetch('/api/action', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'media', action: action })
+        });
+      }
+      toast(`Media: ${action.replace('_', ' ')}`);
+    }
+
+    function sendSystem(action) {
+      if (!wsSend({ type: 'system', action: action })) {
+        _authFetch('/api/action', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'system', action: action })
+        });
+      }
+      toast(`Action: ${action}`);
+    }
+
+    function doWake() {
+      _authFetch('/api/wake', { method: 'POST' });
+      toast('⚡ Saturn Wake command sent!');
+    }
+
+    // ── AI Chat & Voice Dictation ──────────────────────────────────────────
+    const feed = document.getElementById('feed');
+
+    function appendChat(speaker, text) {
+      if (!feed) return;
+      const b = document.createElement('div');
+      const isUser = speaker.toLowerCase() === 'you' || speaker.toLowerCase() === 'user';
+      b.className = `chat-bubble ${isUser ? 'user' : 'saturn'}`;
+      b.textContent = text;
+      feed.appendChild(b);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function appendSys(text) {
+      if (!feed) return;
+      const b = document.createElement('div');
+      b.className = 'chat-bubble sys';
+      b.textContent = text;
+      feed.appendChild(b);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function sendChatMessage() {
+      const inp = document.getElementById('chat-inp');
+      const text = inp.value.trim();
+      if (!text) return;
+
+      appendChat('You', text);
+      inp.value = '';
+
+      const enc = _encrypt(text);
+      const payload = enc ? { type: 'command', enc } : { type: 'command', text };
+
+      if (!wsSend(payload)) {
+        _authFetch('/api/command', {
+          method: 'POST',
+          body: JSON.stringify(enc ? { enc } : { text })
+        });
+      }
+    }
+
+    function sendQuick(promptText) {
+      document.getElementById('chat-inp').value = promptText;
+      sendChatMessage();
+    }
+
+    document.getElementById('chat-inp').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendChatMessage();
+    });
+
+    // Web Speech API Voice Dictation
+    let recognition = null;
+    let isListening = false;
+
+    function toggleVoiceDictation() {
+      const micBtn = document.getElementById('mic-btn');
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        toast('Speech recognition not supported in this browser.');
+        return;
+      }
+
+      if (isListening && recognition) {
+        recognition.stop();
+        return;
+      }
+
+      try {
+        recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          isListening = true;
+          micBtn.classList.add('listening');
+          toast('Listening... Speak now');
+        };
+
+        recognition.onresult = (e) => {
+          const transcript = Array.from(e.results)
+            .map(r => r[0].transcript)
+            .join('');
+          document.getElementById('chat-inp').value = transcript;
+        };
+
+        recognition.onend = () => {
+          isListening = false;
+          micBtn.classList.remove('listening');
+          const finalPrompt = document.getElementById('chat-inp').value.trim();
+          if (finalPrompt) {
+            sendChatMessage();
+          }
+        };
+
+        recognition.onerror = (e) => {
+          isListening = false;
+          micBtn.classList.remove('listening');
+          toast(`Voice error: ${e.error}`);
+        };
+
+        recognition.start();
+      } catch (err) {
+        isListening = false;
+        micBtn.classList.remove('listening');
+        toast(`Voice init error: ${err.message}`);
+      }
+    }
+
+    // ── File Transfer ──────────────────────────────────────────────────────
+    function loadFiles() {
+      const listEl = document.getElementById('files-list');
+      _authFetch('/api/files')
+        .then(r => r.json())
+        .then(data => {
+          const files = data.files || [];
+          if (files.length === 0) {
+            listEl.innerHTML = '<div style="font-size:12px; color:var(--muted); text-align:center; padding:12px;">No uploaded files yet.</div>';
+            return;
+          }
+          listEl.innerHTML = '';
+          files.forEach(f => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            const sizeMb = (f.size / (1024 * 1024)).toFixed(1);
+            item.innerHTML = `
+              <div class="file-info">
+                <div class="file-name">📄 ${f.name}</div>
+                <div class="file-size">${sizeMb} MB</div>
+              </div>
+              <a class="btn-download" href="/uploads/${encodeURIComponent(f.name)}?token=${encodeURIComponent(_authToken)}" download="${f.name}">Download</a>
+            `;
+            listEl.appendChild(item);
+          });
+        })
+        .catch(() => {
+          listEl.innerHTML = '<div style="font-size:12px; color:var(--danger); text-align:center; padding:12px;">Failed to load files list.</div>';
+        });
+    }
+
+    function handleFileUpload(input) {
+      if (!input.files || input.files.length === 0) return;
+      const file = input.files[0];
+      const formData = new FormData();
+      formData.append('file', file);
+
+      toast(`Uploading ${file.name}...`);
+      fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${_authToken}` },
+        body: formData
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.ok) {
+          toast(`✓ ${res.name} uploaded to PC!`);
+          loadFiles();
+        } else {
+          toast(`Upload error: ${res.error || 'Failed'}`);
+        }
+      })
+      .catch(err => {
+        toast(`Upload failed: ${err.message}`);
+      })
+      .finally(() => {
+        input.value = '';
+      });
+    }
+
+    // Initialize on load
+    window.addEventListener('load', () => {
+      initWebSocket();
+    });
+  </script>
+</body>
+</html>

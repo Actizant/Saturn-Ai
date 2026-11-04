@@ -1,0 +1,37 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "disabled": true,
+      "description": "Fetches and transforms web content for agents with markdown conversion."
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git"],
+      "disabled": true,
+      "description": "Full Git version control MCP integration."
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
+      },
+      "disabled": true,
+      "description": "GitHub issues, PRs, file contents, and repo search."
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+      "disabled": true,
+      "description": "Read and query relational PostgreSQL databases safely."
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server"],
+      "disabled": true,
+      "description": "Headless and interactive browser automation via Playwright."
+    }
+  }
+}

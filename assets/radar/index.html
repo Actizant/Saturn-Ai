@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Saturn - Network Radar</title>
+<style>
+  :root {
+    --bg-dark: #070b14;
+    --panel-bg: rgba(13, 20, 36, 0.75);
+    --panel-border: rgba(30, 48, 80, 0.55);
+    --cyan: #00e5ff;
+    --cyan-dim: rgba(0, 229, 255, 0.15);
+    --emerald: #10b981;
+    --emerald-dim: rgba(16, 185, 129, 0.18);
+    --amber: #f59e0b;
+    --purple: #a855f7;
+    --blue: #38bdf8;
+    --text-white: #f8fafc;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "SF Pro Display", sans-serif;
+  }
+
+  body {
+    background-color: var(--bg-dark);
+    color: var(--text-white);
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 14px 18px;
+    background: radial-gradient(circle at 25% 45%, #0d1730 0%, #070b14 70%);
+  }
+
+  /* Header Bar */
+  .header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--panel-border);
+    margin-bottom: 12px;
+    flex-shrink: 0;
+  }
+
+  .brand-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .brand-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: rgba(0, 229, 255, 0.12);
+    border: 1px solid var(--cyan);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: var(--cyan);
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.2);
+  }
+
+  .brand-title {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #fff;
+    text-transform: uppercase;
+  }
+
+  .brand-sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: ui-monospace, monospace;
+    letter-spacing: 0.03em;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .scope-status-pill {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--panel-border);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    color: var(--text-dim);
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--emerald);
+    box-shadow: 0 0 8px var(--emerald);
+  }
+
+  .status-dot.scanning {
+    background: var(--cyan);
+    box-shadow: 0 0 10px var(--cyan);
+    animation: pulseGlow 1.2s infinite ease-in-out;
+  }
+
+  @keyframes pulseGlow {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+
+  .btn-close {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-dim);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-close:hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: #ef4444;
+    color: #fff;
+  }
+
+  /* Main Workspace (Generous Two-Column Split) */
+  .workspace {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Left Radar Scope */
+  .scope-box {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 8px;
+    overflow: hidden;
+  }
+
+  canvas#radarCanvas {
+    display: block;
+    width: 290px;
+    height: 290px;
+    cursor: crosshair;
+  }
+
+  .scope-readout {
+    position: absolute;
+    bottom: 8px;
+    left: 12px;
+    right: 12px;
+    display: flex;
+    justify-content: space-between;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    pointer-events: none;
+  }
+
+  /* Right Side Inspector & Telemetry */
+  .main-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+
+  /* Top 3 Metric Cards */
+  .metrics-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .metric-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 8px 12px;
+  }
+
+  .metric-lbl {
+    font-size: 10px;
+    font-family: ui-monospace, monospace;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 2px;
+  }
+
+  .metric-val {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .metric-sub {
+    font-size: 10px;
+    color: var(--cyan);
+    font-family: ui-monospace, monospace;
+    margin-top: 2px;
+  }
+
+  /* Selected Device Card */
+  .device-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    flex-shrink: 0;
+  }
+
+  .dev-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .dev-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .dev-icon {
+    font-size: 16px;
+  }
+
+  .dev-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--cyan);
+  }
+
+  .dev-badge {
+    font-size: 10px;
+    font-family: ui-monospace, monospace;
+    background: rgba(0, 229, 255, 0.12);
+    color: var(--cyan);
+    border: 1px solid var(--cyan-dim);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  /* Spec Grid: 4 items neatly arranged in one row or 2x2 with plenty of room */
+  .spec-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    background: rgba(7, 12, 24, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+
+  .spec-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .spec-key {
+    color: var(--text-muted);
+    font-size: 9px;
+    text-transform: uppercase;
+  }
+
+  .spec-val {
+    color: var(--text-white);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Ports & Services */
+  .ports-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+  }
+
+  .port-chip {
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--emerald);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  /* Action Buttons */
+  .action-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn-act {
+    flex: 1;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-white);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+
+  .btn-act:hover {
+    background: rgba(0, 229, 255, 0.15);
+    border-color: var(--cyan);
+    color: #fff;
+  }
+
+  .btn-act.primary {
+    background: rgba(0, 229, 255, 0.12);
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+
+  .btn-act.primary:hover {
+    background: var(--cyan);
+    color: #050811;
+  }
+
+  /* Device List & Filter Strip */
+  .list-box {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .filter-strip {
+    display: flex;
+    gap: 5px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--panel-border);
+    flex-shrink: 0;
+  }
+
+  .chip-filter {
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-family: ui-monospace, monospace;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .chip-filter:hover, .chip-filter.active {
+    background: rgba(0, 229, 255, 0.15);
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+
+  .device-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 6px;
+  }
+
+  .device-list::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .device-list::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 2px;
+  }
+
+  .device-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
+  .device-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .device-row.active {
+    background: rgba(0, 229, 255, 0.09);
+    border-color: var(--cyan-dim);
+  }
+
+  .row-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .row-ip {
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .row-vendor {
+    color: var(--text-dim);
+    font-size: 10px;
+  }
+
+  .row-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  /* Bottom Controls */
+  .bottom-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 8px;
+    flex-shrink: 0;
+  }
+
+  .btn-rescan {
+    padding: 7px 14px;
+    border-radius: 6px;
+    background: rgba(0, 229, 255, 0.12);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s;
+  }
+
+  .btn-rescan:hover {
+    background: var(--cyan);
+    color: #050811;
+  }
+
+  .btn-secondary {
+    padding: 7px 12px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
+  }
+
+  .btn-connect-all {
+    padding: 7px 12px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.22), rgba(0, 229, 255, 0.22));
+    border: 1px solid var(--emerald);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+  }
+
+  .btn-connect-all:hover {
+    background: var(--emerald);
+    color: #050811;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .chip-linked {
+    background: rgba(16, 185, 129, 0.22);
+    color: var(--emerald);
+    border: 1px solid rgba(16, 185, 129, 0.5);
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    margin-left: 4px;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+  }
+
+  .status-dot.linked {
+    background: var(--emerald);
+    box-shadow: 0 0 12px var(--emerald);
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 7, 18, 0.85);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  .modal-card {
+    background: #0b1329;
+    border: 1px solid rgba(0, 229, 255, 0.4);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 420px;
+    padding: 22px;
+    box-shadow: 0 0 32px rgba(0, 229, 255, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .btn-mobile-act {
+    background: linear-gradient(135deg, rgba(0, 229, 255, 0.25), rgba(168, 85, 247, 0.25)) !important;
+    border: 1px solid var(--cyan) !important;
+    color: #fff !important;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Top Header Bar -->
+  <div class="header-bar">
+    <div class="brand-group">
+      <div class="brand-badge">⚡</div>
+      <div>
+        <div class="brand-title">Saturn • Network Radar</div>
+        <div class="brand-sub" id="hdrSubnet">SUBNET // 192.168.0.0/24 • LAN PPI</div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="scope-status-pill">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">RADAR SCOPE LOCKED</span>
+      </div>
+      <div class="btn-close" onclick="requestClose()" title="Close (Esc)">✕</div>
+    </div>
+  </div>
+
+  <!-- Workspace Split Grid -->
+  <div class="workspace">
+    <!-- Left Tactical Radar Scope -->
+    <div class="scope-box">
+      <canvas id="radarCanvas" width="290" height="290"></canvas>
+      <div class="scope-readout">
+        <div>BEARING: <span id="lblBearing" style="color:var(--cyan)">000°</span></div>
+        <div>TARGETS: <span id="lblTargetsCount" style="color:var(--cyan)">0 ACTIVE</span></div>
+      </div>
+    </div>
+
+    <!-- Right Side Inspector & Controls -->
+    <div class="main-panel">
+      <!-- Top 3 Metrics Strip -->
+      <div class="metrics-strip">
+        <div class="metric-card">
+          <div class="metric-lbl">Gateway Router</div>
+          <div class="metric-val" id="metricGateway">192.168.0.1</div>
+          <div class="metric-sub" id="metricRouterVendor">TP-Link</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-lbl">Net Download Speed</div>
+          <div class="metric-val" id="metricSpeed" style="color:#38bdf8;">-- Mbps</div>
+          <div class="metric-sub" id="metricLatency" style="color:var(--emerald);">-- ms ping</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-lbl">Public Uplink IP</div>
+          <div class="metric-val" id="metricPublicIp">--</div>
+          <div class="metric-sub" id="metricIsp">Connecting...</div>
+        </div>
+      </div>
+
+      <!-- Selected Device Inspection Card -->
+      <div class="device-card">
+        <div class="dev-header">
+          <div class="dev-title-row">
+            <span class="dev-icon" id="insIcon">🌐</span>
+            <span class="dev-name" id="insName">Select a target on radar</span>
+          </div>
+          <span class="dev-badge" id="insType">LAN DEVICE</span>
+        </div>
+
+        <div class="spec-grid">
+          <div class="spec-item">
+            <span class="spec-key">IP Address</span>
+            <span class="spec-val" id="insIp">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-key">MAC Address</span>
+            <span class="spec-val" id="insMac">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-key">Hardware</span>
+            <span class="spec-val" id="insVendor">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-key">Latency</span>
+            <span class="spec-val" id="insLatency" style="color:var(--emerald);">--</span>
+          </div>
+        </div>
+
+        <div class="ports-bar">
+          <span style="color:var(--text-muted);">SERVICES:</span>
+          <div id="insPorts" style="display:flex; gap:4px; flex-wrap:wrap;">
+            <span style="color:var(--text-muted);">None detected</span>
+          </div>
+        </div>
+
+        <div class="action-row">
+          <button class="btn-act primary" onclick="pingSelectedDevice()">⚡ Ping Target</button>
+          <button class="btn-act" onclick="wakeSelectedDevice()">🔌 Wake-on-LAN</button>
+          <button class="btn-act" onclick="notifySelectedDevice()" id="btnNotifyDevice">📡 Send Alert</button>
+          <button class="btn-act btn-mobile-act" id="btnMobileCompanion" style="display:none;" onclick="openMobileCompanionModal()">📱 Link Phone</button>
+          <button class="btn-act" id="btnWebGui" onclick="openWebGui()">🌐 Open Web</button>
+        </div>
+      </div>
+
+      <!-- Device List -->
+      <div class="list-box">
+        <div class="filter-strip">
+          <div class="chip-filter active" onclick="setFilter('ALL', this)">ALL (<span id="cntAll">0</span>)</div>
+          <div class="chip-filter" onclick="setFilter('Router', this)">ROUTER</div>
+          <div class="chip-filter" onclick="setFilter('Mobile', this)">MOBILE</div>
+          <div class="chip-filter" onclick="setFilter('TV', this)">TV / MEDIA</div>
+          <div class="chip-filter" onclick="setFilter('IoT', this)">IOT</div>
+          <div class="chip-filter" onclick="setFilter('PC', this)">WORKSTATION</div>
+        </div>
+
+        <div class="device-list" id="deviceListContainer">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Bottom Controls -->
+      <div class="bottom-bar">
+        <div style="display:flex; gap:6px;">
+          <button class="btn-rescan" onclick="triggerRescan()">
+            <span>⟳</span> RESCAN NETWORK
+          </button>
+          <button class="btn-connect-all" onclick="connectAllDevices()" id="btnConnectAll" title="Connect to all devices on network and broadcast online notification">
+            <span>🔗</span> CONNECT ALL DEVICES
+          </button>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn-secondary" onclick="openMobileCompanionModal()" title="Link any iPhone or Android phone on Wi-Fi with zero installation">📱 MOBILE LINK (QR)</button>
+          <button class="btn-secondary" onclick="measureSpeedDirect()">⚡ TEST SPEED</button>
+          <button class="btn-secondary" onclick="inspectRouterDirect()">🛡 ROUTER AUDIT</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zero-Install Mobile Link Modal -->
+  <div id="mobileModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="color:#00e5ff; font-size:15px; font-weight:800; letter-spacing:0.06em;">📱 ZERO-INSTALL MOBILE LINK</span>
+        <button onclick="closeMobileModal()" style="background:none; border:none; color:#94a3b8; font-size:18px; cursor:pointer;">✕</button>
+      </div>
+      <p style="font-size:12px; color:#cbd5e1; line-height:1.4;">
+        Connect any iPhone or Android phone on your Wi-Fi to receive lock screen notifications and voice control with <strong>zero app installation</strong>:
+      </p>
+      <div style="background:rgba(0,0,0,0.5); padding:10px 12px; border-radius:10px; border:1px solid rgba(0,229,255,0.25); text-align:center;">
+        <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">Open on phone browser:</div>
+        <div id="mobileLinkUrl" style="font-size:15px; font-weight:800; color:#00e5ff; word-break:break-all;">http://127.0.0.1:8765</div>
+        <button class="btn-act primary" style="margin-top:8px; width:100%; justify-content:center;" onclick="copyMobileUrl()">📋 Copy Link</button>
+      </div>
+      <div style="text-align:center; padding:10px; background:rgba(255,255,255,0.02); border-radius:10px;">
+        <img id="mobileQrImg" src="" alt="QR Code" style="width:160px; height:160px; border-radius:8px; background:#fff; padding:6px; display:inline-block;" />
+        <div style="font-size:11px; color:#94a3b8; margin-top:6px;">Point Phone Camera to Open Instantly</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Global State
+    let radarData = {
+      gateway_ip: "192.168.0.1",
+      subnet: "192.168.0.0/24",
+      router: { vendor: "TP-Link" },
+      internet: { public_ip: "--", isp: "--", ping_latency_ms: 0, download_speed_mbps: 0 },
+      devices: []
+    };
+
+    let selectedDevice = null;
+    let currentFilter = 'ALL';
+    let isScanning = false;
+    let sweepAngle = 0; // In radians
+
+    // SLOW, TACTICAL RADAR SWEEP SPEED (~4.5s per rotation)
+    let sweepSpeed = 0.008; 
+    let scanRipples = [];
+
+    // Canvas Setup
+    const canvas = document.getElementById('radarCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    const CX = W / 2;
+    const CY = H / 2;
+    const MAX_R = W / 2 - 14;
+
+    let targets = [];
+
+    function initTargets() {
+      targets = [];
+      const devs = radarData.devices || [];
+
+      devs.forEach((dev) => {
+        let r, theta;
+        const ipParts = (dev.ip || "192.168.0.1").split(".");
+        const lastOctet = parseInt(ipParts[ipParts.length - 1], 10) || 1;
+
+        if (dev.is_host) {
+          r = 0;
+          theta = 0;
+        } else if (dev.is_router || dev.ip === radarData.gateway_ip) {
+          r = MAX_R * 0.28;
+          theta = -Math.PI / 2; // North
+        } else {
+          const normIdx = (lastOctet % 100) / 100;
+          r = MAX_R * (0.40 + normIdx * 0.52);
+          theta = ((lastOctet * 137.508) % 360) * (Math.PI / 180);
+        }
+
+        let icon = "📡";
+        let color = "#38bdf8";
+        const dType = (dev.device_type || "").toLowerCase();
+
+        if (dev.is_host) { icon = "💻"; color = "#6366f1"; }
+        else if (dev.is_router) { icon = "🌐"; color = "#00e5ff"; }
+        else if (dType.includes("mobile") || dType.includes("phone")) { icon = "📱"; color = "#38bdf8"; }
+        else if (dType.includes("tv") || dType.includes("media")) { icon = "📺"; color = "#f59e0b"; }
+        else if (dType.includes("iot") || dType.includes("web") || (dev.vendor || "").toLowerCase().includes("espressif")) { icon = "⚡"; color = "#10b981"; }
+        else if (dType.includes("pc") || dType.includes("server")) { icon = "🖥️"; color = "#a855f7"; }
+
+        targets.push({
+          raw: dev,
+          r: r,
+          theta: theta,
+          x: CX + r * Math.cos(theta),
+          y: CY + r * Math.sin(theta),
+          color: color,
+          icon: icon,
+          intensity: 0.35,
+          blipRadius: dev.is_host ? 4.5 : (dev.is_router ? 5.5 : 4.0)
+        });
+      });
+
+      updateFilterCounts();
+      renderDeviceList();
+      if (targets.length > 0 && !selectedDevice) {
+        selectDevice(targets[0].raw);
+      }
+    }
+
+    // Radar Scope Render Loop (Calm, Minimal, Tactile)
+    function renderRadar() {
+      ctx.clearRect(0, 0, W, H);
+
+      // 1. Radar Matte Background
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(CX, CY, MAX_R, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(7, 12, 24, 0.94)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.25)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      // 2. Concentric Range Rings
+      const ringSteps = [0.25, 0.50, 0.75, 1.0];
+      ringSteps.forEach((step, idx) => {
+        ctx.beginPath();
+        ctx.arc(CX, CY, MAX_R * step, 0, Math.PI * 2);
+        ctx.strokeStyle = idx === 3 ? "rgba(0, 229, 255, 0.28)" : "rgba(0, 229, 255, 0.08)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      });
+
+      // 3. Polar Crosshair Grid
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.10)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(CX, CY - MAX_R); ctx.lineTo(CX, CY + MAX_R);
+      ctx.moveTo(CX - MAX_R, CY); ctx.lineTo(CX + MAX_R, CY);
+      ctx.stroke();
+
+      // Cardinal Bearing Labels
+      ctx.fillStyle = "rgba(0, 229, 255, 0.45)";
+      ctx.font = "8px ui-monospace, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("N", CX, CY - MAX_R + 10);
+      ctx.fillText("S", CX, CY + MAX_R - 4);
+      ctx.fillText("E", CX + MAX_R - 10, CY + 3);
+      ctx.fillText("W", CX - MAX_R + 10, CY + 3);
+
+      // 4. Sonar Ripples (if scanning)
+      if (isScanning && Math.random() < 0.035) {
+        scanRipples.push({ r: 4, alpha: 0.8 });
+      }
+
+      for (let i = scanRipples.length - 1; i >= 0; i--) {
+        const rip = scanRipples[i];
+        rip.r += 1.4; // Calm expansion
+        rip.alpha -= 0.008;
+        if (rip.alpha <= 0 || rip.r >= MAX_R) {
+          scanRipples.splice(i, 1);
+          continue;
+        }
+        ctx.beginPath();
+        ctx.arc(CX, CY, rip.r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(0, 229, 255, ${rip.alpha * 0.35})`;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+
+      // 5. Calm Rotating Radar Sweep Beam
+      sweepAngle = (sweepAngle + sweepSpeed) % (Math.PI * 2);
+      const trailAngle = Math.PI / 4.5; // ~40 degree soft phosphor trail
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(CX, CY);
+      ctx.arc(CX, CY, MAX_R, sweepAngle - trailAngle, sweepAngle, false);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(0, 229, 255, 0.06)";
+      ctx.fill();
+
+      // Sharp Leading Edge Line
+      ctx.beginPath();
+      ctx.moveTo(CX, CY);
+      ctx.lineTo(CX + MAX_R * Math.cos(sweepAngle), CY + MAX_R * Math.sin(sweepAngle));
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.75)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+
+      // Bearing readout update
+      const deg = Math.round((sweepAngle * 180 / Math.PI)) % 360;
+      document.getElementById('lblBearing').innerText = `${String(deg).padStart(3, '0')}°`;
+
+      // 6. Draw Targets & Phosphor Persistence
+      targets.forEach(tgt => {
+        if (!matchesFilter(tgt.raw)) return;
+
+        // Phosphor sweep check
+        let diff = Math.atan2(Math.sin(sweepAngle - tgt.theta), Math.cos(sweepAngle - tgt.theta));
+        if (diff >= 0 && diff < 0.15) {
+          tgt.intensity = 1.0;
+        } else {
+          tgt.intensity = Math.max(0.35, tgt.intensity * 0.99); // Slow organic decay
+        }
+
+        const isSel = selectedDevice && selectedDevice.ip === tgt.raw.ip;
+
+        // Blip Outer Glow
+        ctx.beginPath();
+        ctx.arc(tgt.x, tgt.y, tgt.blipRadius + 4 * tgt.intensity, 0, Math.PI * 2);
+        ctx.fillStyle = `${tgt.color}${Math.round(tgt.intensity * 60).toString(16).padStart(2, '0')}`;
+        ctx.fill();
+
+        // Blip Core
+        ctx.beginPath();
+        ctx.arc(tgt.x, tgt.y, tgt.blipRadius, 0, Math.PI * 2);
+        ctx.fillStyle = isSel ? "#ffffff" : tgt.color;
+        ctx.fill();
+
+        // Target Acquisition Reticle for Selected Device
+        if (isSel) {
+          ctx.save();
+          ctx.strokeStyle = "#00e5ff";
+          ctx.lineWidth = 1.0;
+          const s = 9;
+          ctx.beginPath();
+          ctx.moveTo(tgt.x - s, tgt.y - s + 3); ctx.lineTo(tgt.x - s, tgt.y - s); ctx.lineTo(tgt.x - s + 3, tgt.y - s);
+          ctx.moveTo(tgt.x + s - 3, tgt.y - s); ctx.lineTo(tgt.x + s, tgt.y - s); ctx.lineTo(tgt.x + s, tgt.y - s + 3);
+          ctx.moveTo(tgt.x - s, tgt.y + s - 3); ctx.lineTo(tgt.x - s, tgt.y + s); ctx.lineTo(tgt.x - s + 3, tgt.y + s);
+          ctx.moveTo(tgt.x + s - 3, tgt.y + s); ctx.lineTo(tgt.x + s, tgt.y + s); ctx.lineTo(tgt.x + s, tgt.y + s - 3);
+          ctx.stroke();
+          ctx.restore();
+        }
+      });
+
+      ctx.restore();
+      requestAnimationFrame(renderRadar);
+    }
+
+    // Click Detection on Radar Scope
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+      let found = null;
+      let minDist = 20;
+
+      targets.forEach(tgt => {
+        if (!matchesFilter(tgt.raw)) return;
+        const d = Math.hypot(mx - tgt.x, my - tgt.y);
+        if (d < minDist) {
+          minDist = d;
+          found = tgt.raw;
+        }
+      });
+
+      if (found) selectDevice(found);
+    });
+
+    // Filtering
+    function setFilter(category, el) {
+      currentFilter = category;
+      document.querySelectorAll('.chip-filter').forEach(c => c.classList.remove('active'));
+      if (el) el.classList.add('active');
+      renderDeviceList();
+    }
+
+    function matchesFilter(dev) {
+      if (currentFilter === 'ALL') return true;
+      const type = (dev.device_type || "").toLowerCase();
+      if (currentFilter === 'Router') return dev.is_router || type.includes('router');
+      if (currentFilter === 'Mobile') return type.includes('mobile') || type.includes('phone');
+      if (currentFilter === 'TV') return type.includes('tv') || type.includes('media');
+      if (currentFilter === 'IoT') return type.includes('iot') || type.includes('web');
+      if (currentFilter === 'PC') return dev.is_host || type.includes('pc') || type.includes('server');
+      return true;
+    }
+
+    function updateFilterCounts() {
+      const devs = radarData.devices || [];
+      document.getElementById('cntAll').innerText = devs.length;
+      document.getElementById('lblTargetsCount').innerText = `${devs.length} ACTIVE`;
+    }
+
+    function renderDeviceList() {
+      const container = document.getElementById('deviceListContainer');
+      container.innerHTML = '';
+
+      const devs = (radarData.devices || []).filter(matchesFilter);
+      if (devs.length === 0) {
+        container.innerHTML = '<div style="padding:14px;text-align:center;color:#64748b;font-size:11px;">No devices matching filter.</div>';
+        return;
+      }
+
+      devs.forEach(dev => {
+        const isSel = selectedDevice && selectedDevice.ip === dev.ip;
+        const div = document.createElement('div');
+        div.className = `device-row ${isSel ? 'active' : ''}`;
+        div.onclick = () => selectDevice(dev);
+
+        const icon = dev.is_host ? "💻" : (dev.is_router ? "🌐" : (dev.device_type && dev.device_type.includes("Mobile") ? "📱" : (dev.device_type && dev.device_type.includes("TV") ? "📺" : "⚡")));
+
+        const isLinked = dev.linked || (radarData && radarData.mesh_linked);
+        const linkedBadge = isLinked ? '<span class="chip-linked">LINKED</span>' : '';
+
+        div.id = `dev-row-${dev.ip.replace(/\./g, '-')}`;
+        div.innerHTML = `
+          <div class="row-left">
+            <span>${icon}</span>
+            <div>
+              <span class="row-ip">${dev.ip}</span>
+              <span class="row-vendor"> • ${dev.vendor || 'LAN Node'}</span>
+              ${linkedBadge}
+            </div>
+          </div>
+          <div class="row-right">
+            <span>${dev.device_type || 'LAN'}</span>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function selectDevice(dev) {
+      selectedDevice = dev;
+      renderDeviceList();
+
+      document.getElementById('insName').innerText = dev.vendor || dev.ip;
+      document.getElementById('insType').innerText = dev.device_type || "LAN DEVICE";
+      document.getElementById('insIp').innerText = dev.ip || "--";
+      document.getElementById('insMac').innerText = dev.mac || "--";
+      document.getElementById('insVendor').innerText = dev.vendor || "LAN Node";
+      document.getElementById('insLatency').innerText = dev.is_host ? "< 0.1 ms" : (dev.is_router ? "1.2 ms" : "< 15 ms");
+
+      const icon = dev.is_host ? "💻" : (dev.is_router ? "🌐" : (dev.device_type && dev.device_type.includes("Mobile") ? "📱" : (dev.device_type && dev.device_type.includes("TV") ? "📺" : "⚡")));
+      document.getElementById('insIcon').innerText = icon;
+
+      // Ports
+      const portsCont = document.getElementById('insPorts');
+      portsCont.innerHTML = '';
+      const ports = dev.open_ports || [];
+      if (ports.length > 0) {
+        ports.forEach(p => {
+          const b = document.createElement('span');
+          b.className = 'port-chip';
+          b.innerText = `:${p}`;
+          portsCont.appendChild(b);
+        });
+      } else {
+        portsCont.innerHTML = '<span style="color:#64748b;">None detected</span>';
+      }
+
+      const hasWeb = ports.includes(80) || ports.includes(8080) || ports.includes(443) || dev.is_router;
+      document.getElementById('btnWebGui').style.display = hasWeb ? 'flex' : 'none';
+
+      const isMobile = dev.is_mobile || (dev.device_type && dev.device_type.includes("Mobile")) || (dev.vendor && dev.vendor.includes("Mobile"));
+      document.getElementById('btnMobileCompanion').style.display = isMobile ? 'flex' : 'none';
+    }
+
+    // Bridge Calls & UI Updates
+    function updateRadarData(newData) {
+      radarData = newData;
+      document.getElementById('hdrSubnet').innerText = `SUBNET // ${newData.subnet || '192.168.0.0/24'} • LAN PPI`;
+      document.getElementById('metricGateway').innerText = newData.gateway_ip || '192.168.0.1';
+      document.getElementById('metricRouterVendor').innerText = (newData.router && newData.router.vendor) ? newData.router.vendor : 'TP-Link';
+
+      if (newData.internet) {
+        document.getElementById('metricPublicIp').innerText = newData.internet.public_ip || '--';
+        document.getElementById('metricIsp').innerText = (newData.internet.isp || '--').slice(0, 18);
+        document.getElementById('metricLatency').innerText = `${newData.internet.ping_latency_ms || 2} ms ping`;
+
+        if (newData.internet.download_speed_mbps && newData.internet.download_speed_mbps > 0) {
+          document.getElementById('metricSpeed').innerText = `${newData.internet.download_speed_mbps} Mbps`;
+        }
+      }
+
+      initTargets();
+      setScanningState(false);
+    }
+
+    function setScanningState(scanning) {
+      isScanning = scanning;
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (scanning) {
+        dot.className = "status-dot scanning";
+        text.innerText = "SWEEPING SUBNET...";
+        sweepSpeed = 0.013; // Calm, steady sweep while scanning
+      } else {
+        dot.className = "status-dot";
+        text.innerText = "RADAR SCOPE LOCKED • SECURE";
+        sweepSpeed = 0.008; // Very calm stealth sweep
+      }
+    }
+
+    function updateSpeedReadout(mbps) {
+      document.getElementById('metricSpeed').innerText = `${mbps} Mbps`;
+    }
+
+    function triggerRescan() {
+      setScanningState(true);
+      if (window.qtBridge && window.qtBridge.triggerRescan) {
+        window.qtBridge.triggerRescan();
+      }
+    }
+
+    function measureSpeedDirect() {
+      document.getElementById('metricSpeed').innerText = "Testing...";
+      if (window.qtBridge && window.qtBridge.testSpeed) {
+        window.qtBridge.testSpeed();
+      }
+    }
+
+    function pingSelectedDevice() {
+      if (!selectedDevice) return;
+      const ip = selectedDevice.ip;
+      document.getElementById('insLatency').innerText = "Pinging...";
+      if (window.qtBridge && window.qtBridge.pingDevice) {
+        window.qtBridge.pingDevice(ip);
+      } else {
+        setTimeout(() => {
+          document.getElementById('insLatency').innerText = "2.1 ms";
+        }, 400);
+      }
+    }
+
+    function wakeSelectedDevice() {
+      if (!selectedDevice || !selectedDevice.mac) return;
+      if (window.qtBridge && window.qtBridge.wakeDevice) {
+        window.qtBridge.wakeDevice(selectedDevice.mac);
+      }
+      alert(`Wake-on-LAN transmitted to ${selectedDevice.mac}`);
+    }
+
+    function openWebGui() {
+      if (!selectedDevice) return;
+      const ip = selectedDevice.ip;
+      const url = `http://${ip}`;
+      if (window.qtBridge && window.qtBridge.openUrl) {
+        window.qtBridge.openUrl(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    function inspectRouterDirect() {
+      if (window.qtBridge && window.qtBridge.inspectRouter) {
+        window.qtBridge.inspectRouter();
+      }
+    }
+
+    function connectAllDevices() {
+      const btn = document.getElementById('btnConnectAll');
+      if (btn) btn.innerHTML = "<span>⟳</span> CONNECTING...";
+      const text = document.getElementById('statusText');
+      if (text) text.innerText = "BROADCASTING MESH BEACON...";
+      if (window.qtBridge && window.qtBridge.connectAllDevices) {
+        window.qtBridge.connectAllDevices();
+      }
+    }
+
+    function notifySelectedDevice() {
+      if (!selectedDevice || !selectedDevice.ip) {
+        alert("Please select a device on the radar first.");
+        return;
+      }
+      const ip = selectedDevice.ip;
+      const text = document.getElementById('statusText');
+      if (text) text.innerText = `TRANSMITTING ALERT TO ${ip}...`;
+      if (window.qtBridge && window.qtBridge.notifyDevice) {
+        window.qtBridge.notifyDevice(ip);
+      }
+      const isMob = selectedDevice.is_mobile || (selectedDevice.device_type && selectedDevice.device_type.includes("Mobile"));
+      if (isMob && text) {
+        const host = (radarData && radarData.host_ip) ? radarData.host_ip : "192.168.0.112";
+        setTimeout(() => {
+          text.innerText = `ALERT BEACON SENT. TO VIEW ON-SCREEN PHONE ALERT: OPEN http://${host}:8765`;
+        }, 800);
+      }
+    }
+
+    function openMobileCompanionModal() {
+      const host = (radarData && radarData.host_ip) ? radarData.host_ip : (location.hostname || "192.168.0.112");
+      const url = `http://${host}:8765`;
+      document.getElementById('mobileLinkUrl').innerText = url;
+      document.getElementById('mobileQrImg').src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(url)}`;
+      document.getElementById('mobileModal').style.display = 'flex';
+    }
+
+    function closeMobileModal() {
+      document.getElementById('mobileModal').style.display = 'none';
+    }
+
+    function copyMobileUrl() {
+      const url = document.getElementById('mobileLinkUrl').innerText;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url);
+        alert(`Copied: ${url}\nOpen this link on your phone (Android/iOS) to enable push notifications!`);
+      } else {
+        alert(`Open this link on your phone:\n${url}`);
+      }
+    }
+
+    function onMeshConnected(data) {
+      const btn = document.getElementById('btnConnectAll');
+      if (btn) btn.innerHTML = "<span>✓</span> MESH LINKED";
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (dot) dot.className = "status-dot linked";
+      const totalLinked = data.total_devices_linked || (radarData.devices ? radarData.devices.length : 0);
+      if (text) text.innerText = `MESH LINK ACTIVE // ${totalLinked} DEVICES LINKED`;
+
+      if (radarData && radarData.devices) {
+        radarData.mesh_linked = true;
+        radarData.devices.forEach(d => { d.linked = true; });
+      }
+      renderDeviceList();
+    }
+
+    function onDeviceNotified(ip, res) {
+      const text = document.getElementById('statusText');
+      if (text) text.innerText = `ALERT TRANSMITTED TO ${ip} // ONLINE`;
+      const rowId = `dev-row-${ip.replace(/\./g, '-')}`;
+      const item = document.getElementById(rowId);
+      if (item) {
+        item.style.borderColor = "var(--emerald)";
+        setTimeout(() => { item.style.borderColor = "transparent"; }, 1500);
+      }
+    }
+
+    function requestClose() {
+      if (window.qtBridge && window.qtBridge.closeRadar) {
+        window.qtBridge.closeRadar();
+      }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') requestClose();
+    });
+
+    // Start
+    initTargets();
+    requestAnimationFrame(renderRadar);
+  </script>
+</body>
+</html>

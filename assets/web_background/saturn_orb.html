@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Saturn Cyberpunk Orb</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  Saturn's signature orb, ported from the Command Center mockup into the running
+  app and hosted in the center stage. The mockup drove itself with demo buttons;
+  this build is driven from Qt through the bridge -- setSaturnState /
+  setAudioLevel / setSaturnRenderBudget / setReduceEffects / setSaturnTheme /
+  saturnBurst -- so ui.py owns state, level, fps, theme and the completion burst.
+
+  The seven shape-encoded states below mirror ui.py class C.S_* one-for-one, so
+  the web orb and the Qt chrome can never drift to different colours. Reduce
+  Effects drops to ~15fps. The render budget the app sets wins when stricter.
+-->
+<style>
+:root{--pg:#05030A;--tx:#F3EDFF;--dm:#9A8FB5;--ln:#3A2152;--ac:#FF2BD6;--ac2:#F5E94B}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;
+  /* The mockup's .mid grid + vignette are painted by Qt across the whole
+     centre column (BackgroundWidget._paint_grid); this page carries only the
+     orb, so it stays fully transparent and the grid reads as one surface. */
+  background:transparent}
+canvas{display:block;width:100%;height:100%;background:transparent}
+</style>
+</head>
+<body>
+<canvas id="c" role="img" aria-label="Saturn cyberpunk orb"></canvas>
+<script>
+// ---- the design palette, and the seven shape-encoded states (mirrors C.S_*) ----
+// ST holds the dark-theme accents plus each state's motion; STLC mirrors the
+// same states onto the light-theme tokens so setSaturnTheme can repaint the orb
+// without touching the geometry. The look is the mockup's: 84-tick audio ring,
+// three dashed inner rings, a hexagon wire, the rotating wireframe globe, a
+// three-spoke reactor, and a burst fired on task completion. No HUD frame, no
+// glitch shear, no scanlines, no platform disc.
+const ST={
+  idle:      {a:"#FF2BD6",b:"#F5E94B",spin:.35,ring:.4, g:.15},
+  listening: {a:"#B6FF3B",b:"#FF2BD6",spin:.5, ring:.7, g:.2},
+  thinking:  {a:"#F5E94B",b:"#FF7A2B",spin:1.4,ring:2.6,g:.5},
+  speaking:  {a:"#FF2BD6",b:"#9B5CFF",spin:.6, ring:.9, g:.3},
+  muted:     {a:"#6E6A7C",b:"#9A94AC",spin:.05,ring:.05,g:0},
+  offline:   {a:"#6B7A99",b:"#9AA7C2",spin:.15,ring:.15,g:.08},
+  error:     {a:"#FF2B4A",b:"#F5E94B",spin:.7, ring:-1.1,g:1}};
+const STLC={
+  idle:["#C2009E","#8A7A00"], listening:["#3F7D00","#C2009E"], thinking:["#8A7A00","#C25100"],
+  speaking:["#C2009E","#6A2FD0"], muted:["#6E6A7C","#9A94AC"], offline:["#5B6785","#8A93B0"],
+  error:["#D0102E","#8A7A00"]};
+// The Qt bridge sends the engine's uppercase state names; alias them onto the
+// seven visuals. Anything unknown falls back to idle, exactly as the reactor did.
+const MAP={IDLE:"idle",ONLINE:"idle",CINEMATIC:"idle",SCANNING:"listening",
+  LISTENING:"listening",THINKING:"thinking",EXECUTING:"thinking",WORKING:"thinking",
+  SPEAKING:"speaking",MUTED:"muted",OFFLINE:"offline",ERROR:"error"};
+
+const $=i=>document.getElementById(i),cv=$("c"),x=cv.getContext("2d");
+// The Performance card hosts a second, tiny instance of this same page via
+// "#mini": it fills its small canvas so the card shows a live miniature of the
+// orb (the mockup crops the main canvas into a 96px one), not a static glyph.
+const MINI=location.hash.indexOf("mini")>=0;
+const hx=h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16));
+const rg=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+let st="idle",light=false,reduce=false,running=true,W=800,H=600,S=640,R=90,last=0,burst=-9;
+let targetLv=0,lv=0,budget=MINI?50:0,D=1;   // audio level + fps budget from the bridge
+const P={a:hx(ST.idle.a),b:hx(ST.idle.b),spin:.35,ring:.4};
+
+function rs(){W=cv.clientWidth||innerWidth;H=cv.clientHeight||innerHeight;D=devicePixelRatio||1;
+  cv.width=W*D;cv.height=H*D;x.setTransform(D,0,0,D,W/2*D,H/2*D);
+  // Match the mockup rs(): a bounded, centred square that scales with the stage
+  // (55% of its width, capped at 540, never taller than the stage) so the orb
+  // shrinks with the window and its glow stays inside the centre column instead
+  // of bleeding through the transparent rail/header. Mini mode fills its canvas.
+  S=MINI?Math.min(W,H):Math.max(240,Math.min(W*.55,540,H>300?H:540));R=S*.14}
+addEventListener("resize",rs);
+
+// ---- the Qt bridge: the entry points ui.py calls ----
+window.setSaturnState=s=>{st=MAP[String(s||"IDLE").toUpperCase()]||"idle"};
+window.setAudioLevel=v=>{targetLv=Math.max(0,Math.min(1,Number(v)||0))};
+window.setPointerNorm=()=>{};   // parallax dropped with the mockup orb
+window.pauseSaturnBackground=()=>{running=false};
+window.resumeSaturnBackground=()=>{if(!running){running=true;last=0;requestAnimationFrame(f)}};
+window.setSaturnRenderBudget=fps=>{const n=Number(fps)||0;budget=n<=0?0:1000/n};
+window.setReduceEffects=r=>{reduce=!!r};
+window.saturnBurst=()=>{burst=performance.now()/1000};
+window.setSaturnTheme=t=>{light=String(t||"dark").toLowerCase()==="light";const r=document.documentElement.style;
+  if(light){r.setProperty("--pg","#F6F1FB");r.setProperty("--ln","#D6C8E8");r.setProperty("--tx","#1A1024");r.setProperty("--dm","#5E5275");}
+  else{r.setProperty("--pg","#05030A");r.setProperty("--ln","#3A2152");r.setProperty("--tx","#F3EDFF");r.setProperty("--dm","#9A8FB5");}};
+if(matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches)window.setReduceEffects(true);
+
+const hs=n=>{const v=Math.sin(n*12.9898)*43758.5453;return v-Math.floor(v)};
+function segRing(r,n,rot,w,col,al,dir){x.lineWidth=w;x.lineCap="butt";x.strokeStyle=rg(col,al);
+  const st0=6.2832/n;
+  for(let i=0;i<n;i++){const d=.25+hs(i+r)*.6;x.beginPath();x.arc(0,0,r,rot*dir+i*st0,rot*dir+i*st0+st0*d);x.stroke()}}
+
+function f(ms){
+  if(!running)return;
+  requestAnimationFrame(f);
+  if(budget&&ms-last<budget)return;      // app render budget wins
+  if(reduce&&ms-last<66)return;           // ~15fps under Reduce Effects
+  last=ms;
+  const t=ms/1000,T=ST[st],k=reduce?1:.08;
+  const lc=light?STLC[st]:null;
+  const A=hx(lc?lc[0]:T.a),B=hx(lc?lc[1]:T.b);
+  for(let i=0;i<3;i++){P.a[i]+=(A[i]-P.a[i])*k;P.b[i]+=(B[i]-P.b[i])*k}
+  P.spin+=(T.spin-P.spin)*k;P.ring+=(T.ring-P.ring)*k;
+  // real mic/voice level from the bridge, floored by each state's idle motion
+  lv+=(targetLv-lv)*.2;
+  const synth=st==="listening"?.3+.5*Math.abs(Math.sin(t*6.1)*Math.sin(t*2.3))
+    :st==="speaking"?.3+.5*Math.abs(Math.sin(t*4.3+Math.sin(t*9)))
+    :st==="thinking"?.25:st==="error"?Math.random()*.4:.1+.05*Math.sin(t*1.4);
+  const amp=Math.max(lv,synth);
+  const a=P.a,b=P.b,mut=st==="muted"||st==="offline",age=t-burst;
+
+  x.globalCompositeOperation="source-over";x.clearRect(-W/2,-H/2,W,H);
+  let g=x.createRadialGradient(0,0,R*.5,0,0,R*3.3);
+  g.addColorStop(0,rg(a,(light?.16:.26)+amp*.2));g.addColorStop(1,rg(a,0));
+  x.fillStyle=g;x.fillRect(-S/2,-S/2,S,S);
+  // 84-tick audio ring; every 7th tick wears the secondary colour
+  x.lineWidth=2.6;x.lineCap="butt";
+  for(let i=0;i<84;i++){const an=i/84*6.2832+t*.05,n=Math.sin(an*6+t*4)*.5+.5,
+    h=3+amp*(n*.8+.2)*R*.55+(i%7?0:6),r1=R*2.45;
+    x.strokeStyle=rg(i%7?a:b,mut?.4:.95);x.beginPath();
+    x.moveTo(Math.cos(an)*r1,Math.sin(an)*r1);x.lineTo(Math.cos(an)*(r1+h),Math.sin(an)*(r1+h));x.stroke()}
+  const tr=t*P.ring;segRing(R*2.2,18,tr,3.4,a,.9,1);segRing(R*1.95,26,tr*1.4,1.8,b,.85,-1);segRing(R*1.7,40,tr*.8,1.3,a,.7,1);
+  x.lineWidth=1;x.strokeStyle=rg(b,.5);x.beginPath();for(let i=0;i<=6;i++){const an=i/6*6.2832-tr*.3,
+    pX=Math.cos(an)*R*2.05,pY=Math.sin(an)*R*2.05;i?x.lineTo(pX,pY):x.moveTo(pX,pY)}x.stroke();
+  g=x.createRadialGradient(0,0,R*.2,0,0,R);g.addColorStop(0,rg(a,.12));g.addColorStop(.75,rg(a,.05));g.addColorStop(1,rg(a,.5));
+  x.fillStyle=g;x.beginPath();x.arc(0,0,R,0,6.2832);x.fill();
+  const Y=t*P.spin,cy=Math.cos(Y),sy=Math.sin(Y),ct=Math.cos(.45),sl=Math.sin(.45),fr=new Path2D();
+  const pt=(la,lo)=>{const X=Math.cos(la)*Math.cos(lo),Yy=Math.sin(la),Z=Math.cos(la)*Math.sin(lo);
+    const X2=X*cy+Z*sy,Z2=-X*sy+Z*cy;return[X2*R,(Yy*ct-Z2*sl)*R,Yy*sl+Z2*ct]};
+  const sg=(p,q)=>{if(p[2]+q[2]>0){fr.moveTo(p[0],p[1]);fr.lineTo(q[0],q[1])}};
+  for(let la=-60;la<=60;la+=30){let p=pt(la*.01745,0);for(let lo=10;lo<=370;lo+=10){const q=pt(la*.01745,lo*.01745);sg(p,q);p=q}}
+  for(let lo=0;lo<180;lo+=30){let p=pt(-1.5708,lo*.01745);for(let la=-80;la<=260;la+=10){const q=pt(la*.01745,lo*.01745);sg(p,q);p=q}}
+  x.save();x.globalCompositeOperation="lighter";x.lineWidth=1.2;
+  x.translate(-2,0);x.strokeStyle=rg(a,mut?.4:.8);x.stroke(fr);x.translate(4,0);x.strokeStyle=rg(b,mut?.3:.6);x.stroke(fr);x.restore();
+  // reactor: the three-spoke core, spun up hard during the completion burst
+  x.save();x.globalCompositeOperation="lighter";x.lineWidth=1.6;
+  for(let j=0;j<2;j++){const rr=age<.8?j*1.0472+(1-Math.min(age/.8,1))*t*6*(j?-1:1):t*P.spin*(j?-1.6:1.6)+j*1.0472;
+    x.strokeStyle=rg(j?a:b,.95);x.beginPath();
+    for(let i=0;i<=3;i++){const an=rr+i*2.0944,pX=Math.cos(an)*R*.5,pY=Math.sin(an)*R*.5;i?x.lineTo(pX,pY):x.moveTo(pX,pY)}x.stroke()}x.restore();
+  x.fillStyle=rg(b,.6+amp*.4);x.beginPath();x.arc(0,0,R*(.07+amp*.05),0,6.2832);x.fill();
+  if(st==="muted"){x.strokeStyle=light?"#1A1024":"#F3EDFF";x.lineWidth=3;x.beginPath();x.moveTo(-R*.5,R*.5);x.lineTo(R*.5,-R*.5);x.stroke()}
+  // completion burst: two expanding rings, a white flash, then an acid checkmark
+  if(age>=0&&age<1.6){
+    for(let q=0;q<2;q++){const u=age-.18*q;if(u>0&&u<1.3){x.lineWidth=.8+3*(1-u/1.3);x.strokeStyle=rg([182,255,59],1-u/1.3);
+      x.beginPath();x.arc(0,0,R*(.8+u*3.2),0,6.2832);x.stroke()}}
+    if(age<.35){g=x.createRadialGradient(0,0,0,0,0,R*1.3);g.addColorStop(0,`rgba(255,255,255,${(1-age/.35)*.8})`);
+      g.addColorStop(1,"rgba(255,255,255,0)");x.fillStyle=g;x.beginPath();x.arc(0,0,R*1.3,0,6.2832);x.fill()}
+    if(age>.3){x.strokeStyle=`rgba(182,255,59,${Math.min(1,(age-.3)*3)*(age>1.2?(1.6-age)/.4:1)})`;x.lineWidth=3.5;x.lineCap="round";
+      x.beginPath();x.moveTo(-R*.26,R*.02);x.lineTo(-R*.07,R*.22);x.lineTo(R*.28,-R*.2);x.stroke()}}
+}
+rs();requestAnimationFrame(f);
+</script>
+</body>
+</html>

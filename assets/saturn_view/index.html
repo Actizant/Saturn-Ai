@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Saturn's View</title>
+  <link rel="stylesheet" href="vendor/cesium/Widgets/widgets.css" />
+  <link rel="stylesheet" href="css/saturn.css" />
+</head>
+<body>
+  <!-- The engine draws here. No product chrome of anyone else's. -->
+  <div id="globe" role="application" aria-label="Saturn's View"></div>
+
+  <!-- Attribution is a licence obligation. It never hides. Our line is a child
+       of the credit container so the two stack in one box instead of fighting
+       over the same corner of the screen. -->
+  <div id="credits"><span id="credits-line"></span></div>
+
+  <!-- Saturn's own readout. Small on purpose. -->
+  <div id="status" hidden>
+    <div class="status__row">
+      <span class="status__mark">SATURN'S VIEW</span>
+      <span class="status__meta" id="status-version"></span>
+    </div>
+    <div class="status__row status__row--sub">
+      <span id="status-fps">--</span>
+      <span class="status__sep">/</span>
+      <span id="status-live">no layers</span>
+    </div>
+  </div>
+
+  <!-- Every layer the engine knows, with its own age. Nothing hides here. -->
+  <aside id="rail" hidden aria-label="Layers">
+    <div class="rail__head">LAYERS</div>
+    <ul class="rail__list" id="rail-list"></ul>
+  </aside>
+
+  <div id="boot">SATURN'S VIEW</div>
+
+  <script src="vendor/cesium/Cesium.js"></script>
+  <script type="module" src="js/engine.js"></script>
+</body>
+</html>

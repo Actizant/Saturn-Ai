@@ -1,0 +1,394 @@
+/*
+ * Saturn's View -- shell styling.
+ *
+ * Dark, quiet, one accent. The globe is the subject; every element here exists
+ * to be ignored until it matters. Accent is Saturn's gold, not the inherited
+ * cyan that the older dashboard tokens still carry.
+ */
+
+:root {
+  --sv-void: #04060a;
+  --sv-deep: #070b12;
+  --sv-line: rgba(232, 184, 75, 0.22);
+  --sv-gold: #e8b84b;
+  --sv-gold-pale: #f2d089;
+  --sv-ink: #eaf1f8;
+  --sv-mute: #9fb3c8;
+  --sv-dim: #5b6b7c;
+  --sv-late: #e8b84b;
+  --sv-stale: #d98a3a;
+  --sv-lost: #c4553d;
+  /* One cold accent, and it means exactly one thing: this is current. Every
+     other colour on screen is Saturn's gold. When the feed slips from live to
+     late, the light goes warm -- so the palette reads as a temperature scale
+     rather than as decoration. */
+  --sv-live: #55d6ce;
+  --sv-font: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --sv-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sv-void);
+  color: var(--sv-ink);
+  font-family: var(--sv-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+#globe {
+  position: absolute;
+  inset: 0;
+}
+
+/* Cesium's own furniture: suppress everything that is not attribution. */
+.cesium-viewer-bottom,
+.cesium-viewer,
+.cesium-widget,
+.cesium-widget canvas {
+  outline: none;
+}
+
+.cesium-performanceDisplay-defaultContainer {
+  display: none !important;
+}
+
+/* Attribution stays visible and legible, just quiet. It sits on a plate
+   because it hangs over the globe, and grey type on sunlit sand is not
+   attribution, it is a smudge. Same vocabulary as the status panel. */
+#credits {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  max-width: 62vw;
+  padding: 5px 10px 5px 8px;
+  border-left: 2px solid rgba(232, 184, 75, 0.34);
+  background: rgba(4, 6, 10, 0.66);
+  backdrop-filter: blur(6px);
+  font-family: var(--sv-mono);
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--sv-mute);
+  opacity: 0.82;
+  pointer-events: auto;
+}
+
+/*
+ * Cesium pins its widget to the absolute bottom-left of whatever container it
+ * is given. The reset that fixes this lives under `.cesium-viewer`, which is a
+ * different subtree from ours, so it never applies here. If the engine ever
+ * hands it credits again, they stack under our line rather than landing on it.
+ */
+#credits .cesium-widget-credits {
+  position: static;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  display: block;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+/*
+ * Cesium renders its "Data attribution" toggle whether or not it has a single
+ * credit to expand. An empty toggle that opens an empty panel is a stock-widget
+ * tell, so it is hidden while there is nothing behind it -- and only then. If a
+ * credit is ever registered it appears, stacked under our line, untouched.
+ */
+#credits .cesium-widget-credits:not(:has(.cesium-credit-text)) {
+  display: none;
+}
+
+#credits-line {
+  font: inherit;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60vw;
+  pointer-events: none;
+}
+
+#credits a,
+#credits a:visited {
+  color: var(--sv-dim);
+  text-decoration: none;
+}
+
+#credits a:hover {
+  color: var(--sv-mute);
+}
+
+/* --- Saturn's readout ------------------------------------------------- */
+
+#status {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 6;
+  padding: 8px 11px 7px;
+  border: 1px solid var(--sv-line);
+  border-left: 2px solid var(--sv-gold);
+  background: rgba(4, 6, 10, 0.62);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  min-width: 148px;
+}
+
+.status__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  line-height: 1.3;
+}
+
+.status__mark {
+  font-family: var(--sv-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--sv-gold);
+}
+
+.status__meta {
+  font-family: var(--sv-mono);
+  font-size: 9px;
+  color: var(--sv-dim);
+}
+
+.status__row--sub {
+  margin-top: 3px;
+  font-family: var(--sv-mono);
+  font-size: 9px;
+  color: var(--sv-mute);
+  letter-spacing: 0.04em;
+}
+
+.status__sep {
+  color: var(--sv-dim);
+  margin: 0 4px;
+}
+
+/* Freshness bands. The number is the point; colour reinforces it. */
+.is-live {
+  color: var(--sv-live);
+}
+.is-late {
+  color: var(--sv-late);
+}
+.is-stale {
+  color: var(--sv-stale);
+}
+.is-lost,
+.is-error {
+  color: var(--sv-lost);
+}
+
+/* --- layer rail -------------------------------------------------------- */
+
+#rail {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 6;
+  width: 212px;
+  padding: 8px 0 4px;
+  border: 1px solid var(--sv-line);
+  border-right: 2px solid var(--sv-gold);
+  background: rgba(4, 6, 10, 0.62);
+  backdrop-filter: blur(6px);
+}
+
+#rail[hidden] {
+  display: none;
+}
+
+.rail__head {
+  padding: 0 11px 6px;
+  font-family: var(--sv-mono);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--sv-dim);
+}
+
+.rail__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rail__button {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  grid-template-areas:
+    "dot name age"
+    ". figure figure";
+  align-items: center;
+  gap: 1px 8px;
+  width: 100%;
+  padding: 5px 11px 6px;
+  border: 0;
+  background: none;
+  color: var(--sv-mute);
+  font-family: var(--sv-font);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.rail__button:hover {
+  background: rgba(232, 184, 75, 0.07);
+}
+
+.rail__button:focus-visible {
+  outline: 1px solid var(--sv-gold);
+  outline-offset: -1px;
+}
+
+.rail__item.is-on .rail__button {
+  color: var(--sv-ink);
+}
+
+.rail__dot {
+  grid-area: dot;
+  justify-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sv-dim);
+}
+
+.rail__dot.is-live {
+  background: var(--sv-live);
+  box-shadow: 0 0 7px rgba(85, 214, 206, 0.55);
+}
+
+.rail__dot.is-late {
+  background: var(--sv-late);
+}
+
+.rail__dot.is-stale {
+  background: var(--sv-stale);
+}
+
+.rail__dot.is-lost {
+  background: var(--sv-lost);
+}
+
+.rail__name {
+  grid-area: name;
+  letter-spacing: 0.01em;
+}
+
+.rail__age {
+  grid-area: age;
+  font-family: var(--sv-mono);
+  font-size: 9px;
+  color: var(--sv-dim);
+}
+
+.rail__item.is-on .rail__age {
+  color: var(--sv-mute);
+}
+
+.rail__figure {
+  grid-area: figure;
+  min-height: 11px;
+  font-family: var(--sv-mono);
+  font-size: 9px;
+  color: var(--sv-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- boot / failure --------------------------------------------------- */
+
+#boot {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sv-void);
+  font-family: var(--sv-mono);
+  font-size: 11px;
+  letter-spacing: 0.34em;
+  color: var(--sv-gold);
+  transition: opacity 260ms ease;
+}
+
+#boot[hidden] {
+  display: none;
+}
+
+.boot--error {
+  color: var(--sv-lost);
+  letter-spacing: 0.06em;
+  padding: 0 40px;
+  text-align: center;
+  line-height: 1.7;
+}
+
+/* --- lens switcher ---------------------------------------------------- */
+
+/* Three words, always in the same place, never a menu. The current lens is
+   the only one carrying light; the others are words until you reach for
+   them. */
+.rail__lens {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin: 0 11px 8px;
+  border: 1px solid rgba(232, 184, 75, 0.14);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.rail__lensbutton {
+  padding: 4px 0 5px;
+  border: 0;
+  background: transparent;
+  color: var(--sv-dim);
+  font-family: var(--sv-mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-align: center;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.rail__lensbutton:hover {
+  color: var(--sv-mute);
+  background: rgba(232, 184, 75, 0.06);
+}
+
+.rail__lensbutton:focus-visible {
+  outline: 1px solid var(--sv-gold);
+  outline-offset: -1px;
+}
+
+.rail__lensbutton.is-on {
+  color: var(--sv-gold-pale);
+  background: rgba(232, 184, 75, 0.1);
+}

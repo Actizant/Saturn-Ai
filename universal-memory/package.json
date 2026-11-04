@@ -1,0 +1,32 @@
+{
+  "name": "universal-memory",
+  "version": "3.6.0",
+  "description": "Standalone adaptive memory and document-RAG layer: hybrid + persisted ANN retrieval, native PDF/Office extraction, encrypted/layout-aware PDFs, multilingual OCR, async embeddings, encryption with key rotation, dedupe, versioning, context assembly, extraction, JSONL/SQLite storage, and a hardened HTTP sidecar. Zero dependencies.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "require": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./server": {
+      "types": "./src/server.d.ts",
+      "require": "./src/server.js",
+      "default": "./src/server.js"
+    }
+  },
+  "type": "commonjs",
+  "files": ["src", "README.md", "MIGRATION.md", "LICENSE", "examples", "eval", "scripts/benchmark.js", "scripts/evaluate.js", "scripts/test.js", "scripts/doctor.js", "test"],
+  "scripts": {
+    "test": "node scripts/test.js",
+    "benchmark": "node scripts/benchmark.js",
+    "evaluate": "node scripts/evaluate.js",
+    "evaluate:ollama": "node scripts/evaluate.js --ollama",
+    "server": "node examples/memory-server.js",
+    "doctor": "node scripts/doctor.js"
+  },
+  "engines": { "node": ">=18" },
+  "keywords": ["memory", "adaptive-memory", "hybrid-search", "bm25", "embeddings", "ollama", "ann", "extraction", "evaluation", "jsonl", "sqlite"],
+  "license": "MIT"
+}

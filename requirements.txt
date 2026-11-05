@@ -40,3 +40,6 @@ PyQt6-WebEngine
 edge-tts
 matplotlib
 speedtest-cli
+# Official MCP SDK - used by the SkillForge's portable tier so that every
+# MCP server Saturn forges is a real, spec-compliant, shareable tool.
+mcp>=1.2.0

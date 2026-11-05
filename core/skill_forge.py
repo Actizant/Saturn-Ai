@@ -52,11 +52,31 @@ class SkillForge:
         skill_name: Optional[str] = None,
         context_hints: str = "",
         max_repair_attempts: int = 2,
+        tier: str = "auto",
     ) -> Dict[str, Any]:
         """
         Synthesizes a brand new skill from natural language, verifies it in the
         Crucible sandbox, auto-resolves pip packages, and hot-registers it.
+
+        tier:
+          "auto"       - classify from the goal text; "lightweight" wins ties.
+          "lightweight"- force today's in-process features/<name>.py path.
+          "portable"   - force the MCP-server path (shareable across clients).
         """
+        # Portable tier hands off cleanly to MCPForge.
+        resolved_tier = tier
+        if resolved_tier == "auto":
+            from core.mcp_forge import classify_tier
+            resolved_tier = classify_tier(goal, skill_name or "", context_hints)
+        if resolved_tier == "portable":
+            from core.mcp_forge import MCPForge
+            return MCPForge.forge_mcp_server(
+                goal=goal,
+                skill_name=skill_name,
+                context_hints=context_hints,
+                max_repair_attempts=max_repair_attempts,
+            )
+
         logger.info(f"[Forge] Initiating skill synthesis for goal: '{goal}'")
 
         # Normalize skill name if provided
@@ -192,6 +212,7 @@ class SkillForge:
 
             return {
                 "success": True,
+                "tier": "lightweight",
                 "name": actual_name,
                 "description": manifest.get("description", ""),
                 "skill_path": str(feature_py_file),

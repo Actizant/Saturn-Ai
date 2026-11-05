@@ -60,7 +60,17 @@ def _run_skill_forge(
 
     name = str(result.get("name") or skill_name or "new_feature")
     description = str(result.get("description") or "")
-    announcement = f"⚡ [Saturn] Synthesized and activated feature '{name}'. {description}".strip()
+    tier = str(result.get("tier") or "lightweight")
+    if tier == "portable":
+        tool_count = len(result.get("tools") or [])
+        live = bool(result.get("live_registered"))
+        announcement = (
+            f"🧩 [Saturn] Forged portable MCP server '{name}' - {tool_count} tool(s) "
+            f"{'hot-loaded live' if live else 'ready to hot-load'}. "
+            f"{description}".strip()
+        )
+    else:
+        announcement = f"⚡ [Saturn] Synthesized and activated feature '{name}'. {description}".strip()
 
     if player and hasattr(player, "write_log"):
         player.write_log(f"Saturn: {announcement}")

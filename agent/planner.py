@@ -334,7 +334,7 @@ OUTPUT — return ONLY valid JSON, no markdown, no explanation, no code blocks:
 """
 
 
-def _planner_system_prompt() -> str:
+def _planner_system_prompt(goal: str = "") -> str:
     prompt = PLANNER_PROMPT
 
     # 1. Inject learned behavioral directives from user
@@ -364,6 +364,21 @@ def _planner_system_prompt() -> str:
             prompt += "\n\nADDITIONAL REGISTERED FEATURE TOOLS:\n" + "\n".join(lines)
     except Exception as exc:
         print(f"[Planner] Dynamic feature listing unavailable: {exc}")
+
+    # 3. Router-selected MCP tools for this specific goal. The router keeps
+    # the prompt small as forged servers multiply: only the tools that
+    # actually score against the goal are shown, never the whole shelf.
+    if goal:
+        try:
+            from core.tool_router import ToolRouter
+            mcp_lines = ToolRouter.get_instance().planner_lines(goal)
+            if mcp_lines:
+                prompt += (
+                    "\n\nMCP SERVER TOOLS RELEVANT TO THIS GOAL "
+                    "(call them by these exact names):\n" + "\n".join(mcp_lines)
+                )
+        except Exception as exc:
+            print(f"[Planner] MCP tool routing unavailable: {exc}")
 
     return prompt
 
@@ -410,7 +425,7 @@ def _rewrite_generated_step(step: dict, goal: str) -> None:
 
 def create_plan(goal: str, context: str = "") -> dict:
     from core.gemini_shim import model as _shim_model
-    system_prompt = _planner_system_prompt()
+    system_prompt = _planner_system_prompt(goal)
     candidates = list(_model_ladder())
     
     user_input = f"Goal: {goal}"
@@ -491,7 +506,7 @@ def _fallback_plan(goal: str) -> dict:
 
 def replan(goal: str, completed_steps: list, failed_step: dict, error: str) -> dict:
     from core.gemini_shim import model as _shim_model
-    system_prompt = _planner_system_prompt()
+    system_prompt = _planner_system_prompt(goal)
     candidates = list(_model_ladder())
 
     completed_summary = "\n".join(

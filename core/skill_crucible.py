@@ -317,3 +317,149 @@ if __name__ == '__main__':
             return False, f"Sandbox execution timed out after {timeout} seconds.", {"elapsed_s": timeout}
         except Exception as e:
             return False, f"Sandbox execution error: {e}", {"elapsed_s": 0}
+
+    # ── Portable-tier validation (real MCP servers) ─────────────────────────
+
+    @staticmethod
+    def validate_ast_server(code_str: str) -> Tuple[bool, Optional[str]]:
+        """Structural check for a FastMCP-style server.
+
+        Same banned-pattern sweep as the lightweight validator, but the
+        mandatory shape is different: imports FastMCP, exposes at least one
+        @mcp.tool() decorated callable, and boots over stdio in __main__.
+        """
+        if not code_str or not code_str.strip():
+            return False, "Server code cannot be empty."
+        try:
+            tree = ast.parse(code_str)
+        except SyntaxError as e:
+            return False, f"Syntax Error on line {e.lineno}: {e.msg}"
+        except Exception as e:
+            return False, f"Validation Error: {e}"
+
+        imports_fastmcp = False
+        has_tool_decorated_fn = False
+        runs_stdio = False
+
+        for node in ast.walk(tree):
+            # Detect `from mcp.server.fastmcp import FastMCP` (or any FastMCP import).
+            if isinstance(node, ast.ImportFrom):
+                if node.module and "mcp" in node.module:
+                    for alias in node.names:
+                        if alias.name == "FastMCP":
+                            imports_fastmcp = True
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("mcp"):
+                        imports_fastmcp = True
+
+            # Detect a function whose decorators include `mcp.tool` or `mcp.tool()`.
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for dec in node.decorator_list:
+                    target = dec.func if isinstance(dec, ast.Call) else dec
+                    if isinstance(target, ast.Attribute) and target.attr == "tool":
+                        owner = target.value
+                        if isinstance(owner, ast.Name) and owner.id == "mcp":
+                            has_tool_decorated_fn = True
+
+            # Detect `mcp.run(transport="stdio")` (or `transport='stdio'`).
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "run" and isinstance(node.func.value, ast.Name) and node.func.value.id == "mcp":
+                    for kw in node.keywords:
+                        if kw.arg == "transport":
+                            val = kw.value
+                            if isinstance(val, ast.Constant) and val.value == "stdio":
+                                runs_stdio = True
+
+        if not imports_fastmcp:
+            return False, "Server must `from mcp.server.fastmcp import FastMCP`."
+        if not has_tool_decorated_fn:
+            return False, "Server exposes no @mcp.tool() decorated functions."
+        if not runs_stdio:
+            return False, "Server's __main__ block must call mcp.run(transport=\"stdio\")."
+
+        # Reuse the destructive-pattern sweep.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                val_lower = node.value.lower()
+                for banned in BANNED_AST_PATTERNS:
+                    if banned in val_lower:
+                        return False, f"Security Violation: Prohibited term '{banned}' detected."
+
+        return True, None
+
+    @classmethod
+    def validate_mcp_server(
+        cls,
+        server_code: str,
+        test_cases: List[Dict[str, Any]],
+        boot_timeout: int = 25,
+        call_timeout: int = 30,
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """Boot the server over stdio and prove tools/list + every tools/call work.
+
+        Writes the code to a temp file, spawns it via the same MCP client
+        Saturn uses at runtime, runs every declared test case, then tears
+        down. This is the closest reproduction of "a real user pointing
+        Claude Desktop at this file" that we can achieve without any
+        external dependency.
+        """
+        import tempfile
+        from core.mcp_manager import MCPServerInstance
+
+        start = time.time()
+        with tempfile.TemporaryDirectory(prefix="saturn_mcp_crucible_") as tmp:
+            script = Path(tmp) / "server.py"
+            script.write_text(server_code, encoding="utf-8")
+
+            cfg = {
+                "command": _get_python_executable(),
+                "args": [str(script)],
+            }
+            instance = MCPServerInstance("crucible", cfg)
+            try:
+                if not instance.start(timeout=boot_timeout):
+                    err = instance.error or "Server did not complete the MCP handshake."
+                    return False, f"Boot failed: {err}", {"elapsed_s": time.time() - start}
+
+                discovered = [t.get("name") for t in instance.tools if t.get("name")]
+                if not discovered:
+                    return False, "tools/list returned zero tools.", {"elapsed_s": time.time() - start}
+
+                results: List[Dict[str, Any]] = []
+                for i, tc in enumerate(test_cases or [{"tool": None, "args": {}}]):
+                    tool_name = tc.get("tool")
+                    args = tc.get("args") or {}
+                    if not tool_name:
+                        # Discovery-only case: tools/list already passed.
+                        results.append({"index": i, "success": True, "output": f"{len(discovered)} tools"})
+                        continue
+                    if tool_name not in discovered:
+                        results.append({
+                            "index": i, "success": False,
+                            "error": f"Test calls unknown tool '{tool_name}'. Available: {discovered}",
+                        })
+                        continue
+                    res = instance.call_tool(tool_name, args, timeout=call_timeout)
+                    if res.get("success"):
+                        results.append({"index": i, "success": True, "output": str(res.get("output"))[:240]})
+                    else:
+                        results.append({"index": i, "success": False, "error": str(res.get("error"))[:240]})
+
+                failed = [r for r in results if not r.get("success")]
+                if failed:
+                    return False, failed[0].get("error", "Tool test failed"), {
+                        "results": results, "elapsed_s": time.time() - start,
+                    }
+                return True, (
+                    f"Booted + answered {len(results)}/{len(results)} cases; "
+                    f"tools={discovered}"
+                ), {"results": results, "elapsed_s": time.time() - start, "tools": discovered}
+            except Exception as exc:
+                return False, f"Crucible MCP error: {exc}", {"elapsed_s": time.time() - start}
+            finally:
+                try:
+                    instance.stop()
+                except Exception:
+                    pass
+

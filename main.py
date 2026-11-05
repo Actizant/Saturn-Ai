@@ -2824,6 +2824,36 @@ class SaturnLive:
         self._idle_speech_thread = threading.Thread(target=self._idle_speech_loop, daemon=True)
         self._idle_speech_thread.start()
 
+        # Capability immune system: sweep forged MCP servers for drifting
+        # health and autonomously re-forge the sick ones. Same daemon
+        # pattern as the idle-speech loop, its own cadence.
+        self._health_thread = threading.Thread(target=self._capability_health_loop, daemon=True)
+        self._health_thread.start()
+
+    def _capability_health_loop(self):
+        """Periodic CapabilityHealth.sweep_and_reforge.
+
+        The sweep itself is conservative (only Saturn's own portable servers,
+        one reforge per pass, 10-minute per-tool cooldown). This loop just
+        gives it a heartbeat: settle after boot, then check every couple of
+        minutes. Voice heads-up only when the channel is actually free.
+        """
+        time.sleep(300.0)  # let boot and any first-forge settle first
+        while True:
+            try:
+                from core.capability_health import CapabilityHealth
+                speak = None
+                if (not getattr(self.ui, "muted", False)
+                        and not getattr(self, "_is_speaking", False)
+                        and not getattr(self, "_pending_attention", False)):
+                    speak = self.speak
+                reforged = CapabilityHealth.sweep_and_reforge(speak=speak, ui=self.ui)
+                if reforged:
+                    print(f"[Health] Auto-reforge kicked for: {', '.join(reforged)}")
+            except Exception as exc:
+                print(f"[Health] Sweep failed: {exc}")
+            time.sleep(120.0)
+
     def set_push_to_talk(self, enabled: bool) -> str:
         self._ptt_enabled = bool(enabled)
         self._ptt_held = False
@@ -4816,6 +4846,41 @@ class SaturnLive:
         self.ui.write_log(f"ERR: {tool_name} — {short}")
         self.speak(f"Sir, {tool_name} encountered an error. {short}")
 
+    def _mcp_elicitation_callback(self, *, message: str, schema: dict,
+                                   server_name: str = "") -> dict | None:
+        """Bridge between an MCP server's `elicitation/create` request and
+        Saturn's UI. The MCP host handler runs on a reader worker thread, so
+        it is safe to block here.
+
+        Order of attempts:
+        1. If the UI has been extended with a proper `request_user_input`
+           surface (mockup will land this), use it - returns a dict of
+           collected values or None on cancel.
+        2. Otherwise log the request and return None so the server gets a
+           clean `action: cancel` and does not hang. The MCP host handler
+           translates None into cancel.
+        """
+        try:
+            self.ui.write_log(
+                f"MCP '{server_name}' is asking you: {message}"
+            )
+        except Exception:
+            pass
+        # Speak the question so the user hears it even with the eyes closed.
+        try:
+            self.speak(f"{server_name or 'A server'} needs one thing from you. {message}")
+        except Exception:
+            pass
+        # Prefer a real UI collector when the Creators page ships with one.
+        collector = getattr(self.ui, "request_user_input", None)
+        if callable(collector):
+            try:
+                return collector(message=message, schema=schema, server_name=server_name)
+            except Exception as exc:
+                print(f"[MCPHost] request_user_input raised: {exc}")
+                return None
+        return None
+
     def _forge_skill(self, goal: str, skill_name: str | None = None) -> str:
         from core.skill_forge import SkillForge
 
@@ -4826,30 +4891,48 @@ class SaturnLive:
             result = {"success": False}
             message = f"Skill creation failed: {exc}"
         if result.get("success"):
+            tier = str(result.get("tier") or "lightweight")
             feature_name = str(result.get("name") or skill_name or "new feature")
             description = str(result.get("description") or "")
-            announcement = f"I created and activated the feature '{feature_name}'."
-            if description:
-                announcement += f" {description}"
-            announcement += f" I created it for this goal: {goal}."
 
-            # Immediately execute the newly forged skill to satisfy the user's goal
+            # Immediately execute the newly forged skill to satisfy the user's goal.
             execution_output = ""
-            try:
-                from core.dynamic_registry import DynamicToolRegistry
-                if DynamicToolRegistry.has_tool(feature_name):
-                    run_res = DynamicToolRegistry.execute_sync(feature_name, {"query": goal, "goal": goal, "input": goal})
-                    if run_res:
-                        if isinstance(run_res, dict):
-                            execution_output = str(run_res.get("summary") or run_res.get("output") or run_res.get("text") or run_res).strip()
-                        else:
-                            execution_output = str(run_res).strip()
-            except Exception as e_run:
-                execution_output = f"(Execution note: {e_run})"
+            if tier == "portable":
+                tools = result.get("tools") or []
+                tool_count = len(tools)
+                live = bool(result.get("live_registered"))
+                announcement = (
+                    f"I forged a portable MCP server '{feature_name}'. "
+                    f"{tool_count} tool(s) verified in the sandbox and "
+                    f"{'hot-loaded live' if live else 'ready to hot-load'}"
+                )
+                if description:
+                    announcement += f" - {description}"
+                announcement += ". Any MCP client (Claude Desktop, Cursor, Qoder, Saturn) can use it."
+                hud_title = f"Evolution (portable MCP): {feature_name}"
+                # Portable servers are executed through UniversalMCPManager on the
+                # next planner turn (mcp_<server>_<tool>); no in-process re-run here.
+            else:
+                announcement = f"I created and activated the feature '{feature_name}'."
+                if description:
+                    announcement += f" {description}"
+                announcement += f" I created it for this goal: {goal}."
+                hud_title = f"Evolution: {feature_name}"
+                try:
+                    from core.dynamic_registry import DynamicToolRegistry
+                    if DynamicToolRegistry.has_tool(feature_name):
+                        run_res = DynamicToolRegistry.execute_sync(feature_name, {"query": goal, "goal": goal, "input": goal})
+                        if run_res:
+                            if isinstance(run_res, dict):
+                                execution_output = str(run_res.get("summary") or run_res.get("output") or run_res.get("text") or run_res).strip()
+                            else:
+                                execution_output = str(run_res).strip()
+                except Exception as e_run:
+                    execution_output = f"(Execution note: {e_run})"
 
             try:
                 self.ui.show_hud_deliverable(
-                    title=f"Evolution: {feature_name}",
+                    title=hud_title,
                     summary=execution_output or announcement,
                     kind="result",
                 )
@@ -4961,6 +5044,26 @@ class SaturnLive:
         try:
             from core.mcp_manager import UniversalMCPManager
             UniversalMCPManager.get_instance().load_servers()
+            # Saturn acts as a full MCP host: servers can call back into
+            # our LLM (sampling) or ask the user a question (elicitation).
+            # Installing the handlers once at boot keeps the reader loop
+            # dispatch generic.
+            try:
+                from core.mcp_host import install_host_handlers
+                install_host_handlers(prompt_callback=self._mcp_elicitation_callback)
+            except Exception as _host_exc:
+                print(f"[MCPHost] sampling/elicitation handlers unavailable: {_host_exc}")
+            # Register MCP tools with the router (router decides which of
+            # them actually enter the LLM tool list per turn below).
+            try:
+                from core.tool_router import ToolRouter
+                _router = ToolRouter.get_instance()
+                _router.register_source(
+                    "mcp",
+                    lambda: UniversalMCPManager.get_instance().get_all_tool_declarations(),
+                )
+            except Exception as _r_exc:
+                print(f"[ToolRouter] MCP source registration failed: {_r_exc}")
             for mcp_tool in UniversalMCPManager.get_instance().get_all_tool_declarations():
                 if mcp_tool.get("name") not in declared_names:
                     tool_declarations.append(mcp_tool)

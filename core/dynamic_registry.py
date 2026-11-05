@@ -31,6 +31,101 @@ FEATURES_DIR = PROJECT_ROOT / "features"
 APPDATA_SKILLS_DIR = get_user_data_dir() / "skills"
 
 
+def _forged_tools_enabled() -> bool:
+    """Global kill switch for everything Saturn forged, shared with the MCP
+    side. Imported lazily so the registry never hard-depends on the manager;
+    if the settings layer is unavailable we fail open (tools stay usable)."""
+    try:
+        from core.mcp_manager import forged_tools_enabled
+        return forged_tools_enabled()
+    except Exception:
+        return True
+
+
+def _audit(name: str, ok: bool, started: float,
+           args: Dict[str, Any], error: Optional[str]) -> None:
+    """Append one feature call to the persistent audit trail. Best-effort,
+    mirroring ``_record_health``: telemetry must never break a real call."""
+    try:
+        from core.audit_log import AuditLog
+        AuditLog.record(name, ok, (time.time() - started) * 1000.0,
+                        args, error, tier="feature")
+    except Exception:
+        pass
+
+
+def _skill_source_text(skill: "DynamicSkill") -> str:
+    try:
+        code_path = skill.skill_path / "skill.py" if skill.skill_path.is_dir() else skill.skill_path
+        return code_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _permission_gate(skill: "DynamicSkill", run: Callable[[], Any],
+                     args: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Apply the forged feature's permission level; None means it may run.
+
+    Same contract as the MCP gate, same forged-only rule: hand-written
+    native features are the user's own codebase. Lightweight skills carry
+    no per-tool table, so the declaration is the manifest's ``requires``
+    list, and a scan of the actual source backstops a missing or dishonest
+    declaration the same way the forge does at creation time.
+    """
+    if not skill.forged:
+        return None
+    try:
+        from core import permissions
+        from core.mcp_forge import infer_declared_needs
+        requires = [str(r).lower() for r in (skill.manifest.get("requires") or [])]
+        requires = sorted(set(requires) | set(infer_declared_needs(_skill_source_text(skill))))
+        level = permissions.resolve(
+            skill.name, skill.name, requires=requires,
+            tool_name=skill.name, description=skill.description)
+    except Exception as exc:  # a broken gate must never brick the toolbelt
+        logger.debug(f"[Registry] permission gate skipped: {exc}")
+        return None
+
+    if level == permissions.BLOCK:
+        why = f"feature '{skill.name}' is set to Block"
+        _audit(skill.name, False, time.time(), {}, f"Blocked: {why}")
+        return (f"Blocked: the user set '{skill.name}' to Block on Saturn's "
+                f"Creators page, so this call was refused. Do not retry it; "
+                f"tell the user it is blocked and that they can change the "
+                f"permission on the Creators page.")
+
+    if level != permissions.ASK:
+        return None
+
+    from core import confirm
+    if not confirm.is_bound():
+        # Headless (tests, CLI, early boot): nobody can see a banner, so
+        # asking would only refuse. Allow the run; the gate reappears the
+        # moment the HUD is wired.
+        logger.debug(f"[Registry] ask-gate skipped (no UI): {skill.name}")
+        return None
+    if confirm.pending_title():
+        return ("[CONFIRMATION_PENDING] Another confirmation is already on "
+                f"screen, so '{skill.name}' has not been run yet. Ask the user "
+                "to answer that confirmation first.")
+
+    def _run_confirmed() -> str:
+        _t0 = time.time()
+        try:
+            out = run()
+            _audit(skill.name, True, _t0, args or {}, None)
+            return str(out)[:600]
+        except Exception as exc:
+            _audit(skill.name, False, _t0, args or {}, str(exc))
+            return f"Failed after confirmation: {exc}"
+
+    needs = ", ".join(requires) or "see the Creators page"
+    return confirm.request(
+        f"feature_{skill.name}", f"Run {skill.name}?",
+        f"Saturn forged this feature itself and you set it to ask first. "
+        f"Declared needs: {needs}.", _run_confirmed)
+
+
 class DynamicSkill:
     """Represents a loaded, runnable feature or synthetic skill in Saturn."""
 
@@ -49,6 +144,11 @@ class DynamicSkill:
         self.created_at: float = manifest.get("created_at", time.time())
         self.invocations: int = manifest.get("invocations", 0)
         self.last_error: Optional[str] = manifest.get("last_error", None)
+        # Same forged test the CreatorsCatalog uses: Saturn's own synthetic
+        # authors, never a hand-written native feature. The global
+        # forged-tools kill switch and the audit log key off this.
+        _author = str(manifest.get("author", "")).lower()
+        self.forged: bool = ("saturn" in _author or "self-evolution" in _author)
 
     def _load_module(self) -> Any:
         if self.module is None:
@@ -71,16 +171,46 @@ class DynamicSkill:
             "parameters": self.parameters,
         }
 
+    def _record_health(self, ok: bool, started: float, error: Optional[str]) -> None:
+        """Hand the outcome to Saturn's capability immune system so a
+        lightweight FEATURE gets the same health tracking + auto-reforge as
+        an MCP server. Best-effort: never let telemetry break a real call."""
+        try:
+            from core.capability_health import CapabilityHealth
+            CapabilityHealth.record(
+                self.name, ok=ok,
+                latency_ms=(time.time() - started) * 1000.0, error=error)
+        except Exception:
+            pass
+
     def execute_sync(self, **kwargs) -> Any:
         """Executes the skill synchronously (safe for worker threads)."""
         module = self._load_module()
         if not hasattr(module, "execute"):
             raise AttributeError(f"Feature '{self.name}' has no 'execute' function.")
         func = getattr(module, "execute")
-        self.invocations += 1
-        if inspect.iscoroutinefunction(func):
-            return asyncio.run(func(**kwargs))
-        return func(**kwargs)
+
+        def _run() -> Any:
+            self.invocations += 1
+            _t0 = time.time()
+            try:
+                if inspect.iscoroutinefunction(func):
+                    out = asyncio.run(func(**kwargs))
+                else:
+                    out = func(**kwargs)
+            except Exception as exc:
+                self._record_health(False, _t0, str(exc))
+                raise
+            self._record_health(True, _t0, None)
+            return out
+
+        # The permission gate wraps the real run so a confirmed call keeps
+        # the original arguments and does not re-question itself on the
+        # confirm worker thread.
+        gate = _permission_gate(self, _run, kwargs)
+        if gate is not None:
+            return gate
+        return _run()
 
     async def execute_async(self, **kwargs) -> Any:
         """Executes the skill asynchronously without thread-pool registration conflicts."""
@@ -89,12 +219,29 @@ class DynamicSkill:
             raise AttributeError(f"Feature '{self.name}' has no 'execute' function.")
 
         func = getattr(module, "execute")
-        self.invocations += 1
 
+        def _run() -> Any:
+            # Called either inline (async func is awaited separately) or on
+            # the confirm worker; asyncio primitives do not cross loops.
+            self.invocations += 1
+            _t0 = time.time()
+            try:
+                if inspect.iscoroutinefunction(func):
+                    out = asyncio.run(func(**kwargs))
+                else:
+                    out = func(**kwargs)
+            except Exception as exc:
+                self._record_health(False, _t0, str(exc))
+                raise
+            self._record_health(True, _t0, None)
+            return out
+
+        gate = _permission_gate(self, _run, kwargs)
+        if gate is not None:
+            return gate
         if inspect.iscoroutinefunction(func):
             return await func(**kwargs)
-        else:
-            return await asyncio.to_thread(func, **kwargs)
+        return await asyncio.to_thread(_run)
 
 
 class DynamicToolRegistry:
@@ -194,10 +341,30 @@ class DynamicToolRegistry:
 
     @classmethod
     def get_tool_declarations(cls) -> List[Dict[str, Any]]:
-        """Returns Gemini-compatible tool declarations for all active skills."""
+        """Returns Gemini-compatible tool declarations for all active skills.
+
+        When the global forged-tools kill switch is off, Saturn-forged
+        features disappear from the declaration set entirely - the planner
+        cannot offer what the user has switched off.
+        """
         if not cls._initialized:
             cls.initialize()
-        return [skill.to_tool_declaration() for skill in cls._skills.values() if skill.active]
+        allow_forged: Optional[bool] = None
+        rows: List[Dict[str, Any]] = []
+        for skill in cls._skills.values():
+            if not skill.active:
+                continue
+            if skill.forged:
+                if allow_forged is None:
+                    try:
+                        from core.mcp_manager import forged_tools_enabled
+                        allow_forged = forged_tools_enabled()
+                    except Exception:
+                        allow_forged = True
+                if not allow_forged:
+                    continue
+            rows.append(skill.to_tool_declaration())
+        return rows
 
     @classmethod
     def has_tool(cls, name: str) -> bool:
@@ -456,10 +623,15 @@ class DynamicToolRegistry:
         skill = cls.get_skill(name)
         if not skill or not skill.active:
             return f"Error: Feature '{name}' is unavailable or deactivated."
+        if skill.forged and not _forged_tools_enabled():
+            return (f"Error: forged tools are currently disabled in Saturn's "
+                    f"settings, so '{name}' cannot run.")
 
+        _t0 = time.time()
         try:
-            return skill.execute_sync(**args)
+            out = skill.execute_sync(**args)
         except Exception as e:
+            _audit(name, False, _t0, args, str(e))
             skill.last_error = str(e)
             logger.error(f"[Registry] Execution error in feature '{name}': {e}", exc_info=True)
             try:
@@ -469,6 +641,13 @@ class DynamicToolRegistry:
             except Exception:
                 pass
             raise
+        if isinstance(out, str) and out.startswith(("Blocked:", "[CONFIRMATION_PENDING]")):
+            # A gate refusal, not a run: record it as one so the audit
+            # trail and the health view do not count it as a success.
+            _audit(name, False, _t0, args, out[:200])
+        else:
+            _audit(name, True, _t0, args, None)
+        return out
 
     @classmethod
     async def execute_async(cls, name: str, args: Dict[str, Any]) -> Any:
@@ -476,11 +655,15 @@ class DynamicToolRegistry:
         skill = cls.get_skill(name)
         if not skill or not skill.active:
             return f"Error: Synthetic skill '{name}' is unavailable or deactivated."
+        if skill.forged and not _forged_tools_enabled():
+            return (f"Error: forged tools are currently disabled in Saturn's "
+                    f"settings, so '{name}' cannot run.")
 
+        _t0 = time.time()
         try:
             result = await skill.execute_async(**args)
-            return result
         except Exception as e:
+            _audit(name, False, _t0, args, str(e))
             skill.last_error = str(e)
             logger.error(f"[Registry] Execution error in skill '{name}': {e}", exc_info=True)
             # Route to auto heal engine if available
@@ -491,3 +674,8 @@ class DynamicToolRegistry:
             except Exception:
                 pass
             raise
+        if isinstance(result, str) and result.startswith(("Blocked:", "[CONFIRMATION_PENDING]")):
+            _audit(name, False, _t0, args, result[:200])
+        else:
+            _audit(name, True, _t0, args, None)
+        return result

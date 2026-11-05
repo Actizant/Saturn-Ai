@@ -34,10 +34,13 @@ Saturn wakes with the truth, not templates: live weather for your city, Nifty / 
 Full-duplex voice over Gemini Live, plus live webcam and screen vision — read a contract, debug a stack trace on your monitor, or identify the part sitting on your desk. Say *"see me"* and it opens the camera, recognises **you** on-device (a local face descriptor, never a photo), greets you by name and describes the people in frame — you, a friend who's enrolled, even a stranger it won't presume to name — not just the room.
 
 **Vibe with whatever you're playing.**
-Saturn has a third ear. It listens to the music already coming out of your own speakers — knowing the track from its window title and *feeling* its energy through an optional audio loopback — so the orb pulses to the beat, it reacts out loud to a good pick, and it quietly learns your taste. Off by default it changes nothing; a loopback only opens while music actually plays, and the audio is analysed locally, never uploaded.
+Saturn has a third ear. It listens to the music already coming out of your own speakers — knowing the track from its window title and *feeling* its energy through an optional audio loopback — so the orb pulses to the beat, it reacts out loud to a good pick, and it quietly learns your taste. A loopback only opens while music actually plays, and the audio is analysed locally, never uploaded.
 
 **Build the tool it's missing.**
-Ask for something outside its toolkit and Saturn recognises the gap, authors a new Python capability, runs it through an isolated Crucible sandbox, and hot-registers it. No restart, no plugin store.
+Ask for something outside its toolkit and Saturn recognises the gap, authors a new Python capability, runs it through an isolated Crucible sandbox, and hot-registers it. No restart, no plugin store. Each forged tool declares what it needs — network, files, commands — and every call is approval-gated: allowed verbs run free, risky ones ask first, blocked ones refuse. No pretending otherwise.
+
+**Keep a creators' shelf — and a toolbox.**
+The CREATORS page lists every capability Saturn has grown or been given: what goal it was forged from, which version it's on, its full call audit trail, and a permission row per verb (Always allow / Ask each time / Block). A safety bar holds the global kill switch and a cap on how many forged servers stay awake at once. The CREATOR TOOLS page runs the machine side: your developer workspace and a grid of every MCP server you've hand-configured, hot-plugged live with a trust dialog — connect, disconnect or remove without editing JSON.
 
 **Run your tasks like an operator.**
 A dedicated Tasks workspace shows what's running, what's waiting on your approval, what failed and why — step by step, with logs and the files each task produced.
@@ -94,8 +97,9 @@ A few things to say:
 ```
 Saturn-Ai/
 ├── main.py                 # entry point + live event loop
-├── ui.py                   # PyQt6 shell: command bar, waveform, HUD, chat,
-│                           #   briefing, tasks, memory inspector, settings
+├── ui.py                   # PyQt6 shell: command centre rail, waveform, HUD,
+│                           #   chat, briefing, tasks, memory inspector,
+│                           #   creators shelf, creator tools, settings
 ├── actions/                # the built-in capability tools
 │   ├── circuit_assembler.py
 │   ├── geospatial_globe.py
@@ -107,6 +111,10 @@ Saturn-Ai/
 │   ├── face_id.py          # on-device face detection, matching & identity
 │   ├── skill_forge.py      # capability synthesis
 │   ├── skill_crucible.py   # isolated trial sandbox
+│   ├── mcp_forge.py        # forges a missing tool into a live MCP server
+│   ├── permissions.py      # declared-needs, risk, Always/Ask/Block gating
+│   ├── audit_log.py        # persistent per-call audit trail
+│   ├── creators_catalog.py # the truth the creators pages read
 │   └── identity.py         # persona + behavioural core
 ├── features/               # tools Saturn has grown itself
 ├── skills/                 # loadable skill packs
@@ -118,7 +126,7 @@ Saturn-Ai/
 
 ## Data & privacy
 
-Saturn keeps its whole world on your disk — memory, credentials and settings live under `%LOCALAPPDATA%\SaturnAI\` and are never uploaded. API keys are encrypted at rest with Windows DPAPI, bound to your user account, and decrypt transparently for the app. Face identity is a local 128-number descriptor — never a photograph — and music you play is analysed on-device through a speaker loopback, not sent anywhere. Camera and microphone frames stream only while you are actively talking. See [PRIVACY_POLICY.md](PRIVACY_POLICY.md), and read [SECURITY.md](SECURITY.md) before exposing the local gateway to a network.
+Saturn keeps its whole world on your disk — memory, credentials and settings live under `%LOCALAPPDATA%\SaturnAI\` and are never uploaded. API keys are encrypted at rest with Windows DPAPI, bound to your user account, and decrypt transparently for the app. Face identity is a local 128-number descriptor — never a photograph — and music you play is analysed on-device through a speaker loopback, not sent anywhere. Camera and microphone frames stream only while you are actively talking. Tools Saturn forged for itself only ever get the access they declared at forge time, every call is logged locally, and one switch turns them all off. See [PRIVACY_POLICY.md](PRIVACY_POLICY.md), and read [SECURITY.md](SECURITY.md) before exposing the local gateway to a network.
 
 ## License
 

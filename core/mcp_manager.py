@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.user_paths import get_user_data_dir
+from core.audit_log import AuditLog
 
 logger = logging.getLogger("MCPManager")
 logger.setLevel(logging.INFO)
@@ -36,6 +37,70 @@ logger.setLevel(logging.INFO)
 CONFIG_DIR = get_user_data_dir() / "config"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 MCP_CONFIG_FILE = CONFIG_DIR / "mcp_servers.json"
+
+# The minimal, secret-free environment every MCP child process gets.
+# A blanket os.environ.copy() used to hand every server - including code
+# Saturn forged - Saturn's whole environment: API keys, tokens, everything.
+# Children now receive only these ordinary system/toolchain variables (with
+# real values taken from the local machine so PATH keeps working) plus
+# whatever the server's config explicitly declares in its own "env" block.
+# On Windows os.environ lookup is case-insensitive, so the canonical upper
+# spellings resolve "Path", "SystemRoot", etc.; on POSIX the Windows-only
+# names simply never match and drop out.
+_SAFE_INHERIT_ENV: Tuple[str, ...] = (
+    "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+    "TEMP", "TMP", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "HOME",
+    "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "PROGRAMFILES",
+    "PYTHONHOME", "PYTHONPATH", "NODE_PATH", "LANG", "LC_ALL", "TZ",
+)
+
+# A server that will not boot must not be re-spawned on every routed call.
+# One launch attempt per this window.
+_START_RETRY_SECONDS = 30.0
+
+
+def _minimal_base_env() -> Dict[str, str]:
+    """Whitelisted slice of the process environment safe for child servers."""
+    base: Dict[str, str] = {}
+    for key in _SAFE_INHERIT_ENV:
+        try:
+            if key in os.environ:
+                base[key] = os.environ[key]
+        except Exception:
+            continue
+    if not any(k.lower() == "path" for k in base):
+        # Worst case at least let the interpreter's own directory work.
+        base["PATH"] = str(Path(sys.executable or "python").parent)
+    return base
+
+
+def forged_tools_enabled() -> bool:
+    """The global kill switch for everything Saturn forged.
+
+    Backed by ``forged_tools_enabled`` in the app settings and on by default.
+    When off, forged MCP servers stay visible but cannot be called, and
+    forged features refuse at dispatch. Hand-configured servers are untouched.
+    """
+    try:
+        from memory.config_manager import get_setting
+        return bool(get_setting("forged_tools_enabled", True))
+    except Exception:
+        return True
+
+
+def forged_max_running() -> int:
+    """How many forged servers Saturn will keep spawned at once.
+
+    Forged servers start lazily, on the call that needs one, and each is a
+    live Python process. This cap is the honest version of the design's "Max
+    running" select: past it, waking another lazy server is refused with a
+    clear reason rather than quietly ballooning memory. Backed by
+    ``forged_max_running`` in the app settings; 4 by default."""
+    try:
+        from memory.config_manager import get_setting
+        return max(1, int(get_setting("forged_max_running", 4)))
+    except Exception:
+        return 4
 
 
 class MCPServerInstance:
@@ -73,6 +138,13 @@ class MCPServerInstance:
         self.tools: List[Dict[str, Any]] = []
         self.is_connected = False
         self.error: Optional[str] = None
+        # Saturn-forged servers are lazy by default: registering one must not
+        # cost RAM until it is actually called. The forge marks its configs
+        # with source "saturn_mcp_forge"; "lazy" overrides per server.
+        self.is_forged = str(config.get("source", "")) == "saturn_mcp_forge"
+        self.lazy = bool(config.get("lazy", self.is_forged))
+        self._last_start_attempt = 0.0
+        self._manifest_tools: Optional[List[Dict[str, Any]]] = None
         # Every resource / prompt the server exposes beyond plain tools.
         # Populated after the initialize handshake so the ToolRouter and the
         # planner can reason over the full server surface, not just tools/list.
@@ -83,6 +155,34 @@ class MCPServerInstance:
         # that actually implement them.
         self.server_capabilities: Dict[str, Any] = {}
 
+    def load_manifest_tools(self) -> List[Dict[str, Any]]:
+        """Tool list read from the forge manifest on disk.
+
+        A lazy server is not running until it is called, but the planner
+        still has to see its verbs. The forge already wrote each tool's
+        name/description/inputSchema into manifest.json next to
+        server.py, and that block has the same shape as a live
+        ``tools/list`` entry, so declarations can be built without
+        spawning the process. Cached; empty list means nothing to show.
+        """
+        if self._manifest_tools is not None:
+            return self._manifest_tools
+        self._manifest_tools = []
+        try:
+            if self.args:
+                mp = Path(str(self.args[0])).parent / "manifest.json"
+                if mp.exists():
+                    data = json.loads(mp.read_text(encoding="utf-8"))
+                    tools = data.get("tools")
+                    if isinstance(tools, list):
+                        self._manifest_tools = [
+                            t for t in tools
+                            if isinstance(t, dict) and t.get("name")
+                        ]
+        except Exception as exc:
+            logger.debug(f"[MCP:{self.name}] manifest tools read failed: {exc}")
+        return self._manifest_tools
+
     def start(self, timeout: int = 20) -> bool:
         """Launches the server subprocess, completes JSON-RPC handshake, and fetches tools."""
         with self._lock:
@@ -91,9 +191,12 @@ class MCPServerInstance:
 
             cmd_resolved = shutil.which(self.command) or self.command
             full_cmd = [cmd_resolved] + [str(a) for a in self.args]
+            self._last_start_attempt = time.time()
 
-            # Merge environment variables
-            merged_env = os.environ.copy()
+            # Secret-free base environment + this server's declared "env".
+            # Never os.environ.copy(): children must not inherit Saturn's
+            # API keys just because they exist.
+            merged_env = _minimal_base_env()
             merged_env.update({str(k): str(v) for k, v in self.env_vars.items()})
 
             try:
@@ -476,18 +579,30 @@ class UniversalMCPManager:
                 except Exception as e:
                     logger.error(f"[MCPManager] Error reading config from {p}: {e}")
 
+        allow_forged = forged_tools_enabled()
         for name, cfg in merged_configs.items():
             if cfg.get("disabled", False):
                 continue
             if name not in self._servers:
                 instance = MCPServerInstance(name, cfg)
+                self._servers[name] = instance
+                if instance.is_forged and not allow_forged:
+                    # Kill switch off the ground: stay registered so the
+                    # user can still see the capability, but never spawn
+                    # and refuse every call at the routing seam.
+                    logger.info(f"[MCPManager] '{name}' forged but forged tools are disabled")
+                    continue
+                if instance.lazy:
+                    # No RAM until first call; the manifest keeps the tools
+                    # visible to the planner in the meantime.
+                    logger.info(f"[MCPManager] '{name}' registered lazily (not spawned yet)")
+                    continue
                 # Start in background thread to avoid blocking startup
                 threading.Thread(
                     target=instance.start,
                     name=f"MCPInit-{name}",
                     daemon=True
                 ).start()
-                self._servers[name] = instance
 
     def get_all_tool_declarations(self) -> List[Dict[str, Any]]:
         """
@@ -501,9 +616,16 @@ class UniversalMCPManager:
         """
         declarations = []
         for server_name, server in self._servers.items():
-            if not server.is_connected:
+            if server.is_connected:
+                tools = server.tools
+            elif getattr(server, "lazy", False) and forged_tools_enabled():
+                # Lazy forged server that has not been woken yet: declare
+                # straight from its manifest so the planner still sees the
+                # capability; the first real call spawns the process.
+                tools = server.load_manifest_tools()
+            else:
                 continue
-            for tool in server.tools:
+            for tool in tools:
                 t_name = f"mcp_{server_name}_{tool.get('name')}"
                 t_desc = f"[MCP:{server_name}] {tool.get('description', '')}"
                 raw_schema = tool.get("inputSchema", {})
@@ -580,8 +702,17 @@ class UniversalMCPManager:
         Routes a tool call 'mcp_<server>_<tool>' to the appropriate server.
 
         Every call is recorded by the CapabilityHealth monitor so Saturn can
-        notice a forged server drifting and offer to reforge it. The record
-        is best-effort: a broken monitor never breaks a real tool call.
+        notice a forged server drifting and offer to reforge it, and lands
+        in the persistent audit log with its (secret-redacted) arguments,
+        outcome and duration. Both records are best-effort: a broken
+        monitor never breaks a real tool call.
+
+        Gates checked before routing, in order: the global forged-tools
+        kill switch, the per-server ``disabled`` flag, the per-tool
+        permission level (Block refuses, Ask each time parks the call
+        behind the on-screen confirmation banner), then connectivity -
+        a lazy server that has never run is spawned right here, on the
+        call that first needs it.
         """
         if not full_tool_name.startswith("mcp_"):
             return f"Error: '{full_tool_name}' is not an MCP tool."
@@ -596,32 +727,161 @@ class UniversalMCPManager:
         if not server:
             self._record_health(full_tool_name, False, 0.0,
                                 f"server '{server_name}' not registered")
+            AuditLog.record(full_tool_name, False, 0.0, arguments,
+                            f"server '{server_name}' not registered")
             return f"Error: MCP server '{server_name}' is not registered or running."
+
+        if getattr(server, "is_forged", False) and not forged_tools_enabled():
+            self._record_health(full_tool_name, False, 0.0, "forged tools disabled")
+            AuditLog.record(full_tool_name, False, 0.0, arguments,
+                            "forged tools disabled by user")
+            return (f"Error: forged tools are currently disabled in Saturn's "
+                    f"settings, so '{server_name}' cannot run.")
+
+        if (getattr(server, "config", {}) or {}).get("disabled", False):
+            self._record_health(full_tool_name, False, 0.0, "server disabled")
+            AuditLog.record(full_tool_name, False, 0.0, arguments,
+                            f"server '{server_name}' is disabled")
+            return f"Error: MCP server '{server_name}' is disabled."
+
+        if not server.is_connected and getattr(server, "proc", None) is None \
+                and time.time() - getattr(server, "_last_start_attempt", 0.0) >= _START_RETRY_SECONDS:
+            # Lazy first use (or a retry after the backoff window): this
+            # call is what wakes the server. Past the concurrency cap we
+            # refuse rather than spawn another process the user did not ask
+            # to keep resident.
+            if getattr(server, "is_forged", False) and self._running_forged_count() >= forged_max_running():
+                why = f"max running forged servers ({forged_max_running()}) reached"
+                self._record_health(full_tool_name, False, 0.0, why)
+                AuditLog.record(full_tool_name, False, 0.0, arguments, why)
+                return (f"Error: '{server_name}' is asleep to save memory and "
+                        f"{self._running_forged_count()} forged servers are already "
+                        f"running (the limit). Close one on the Creators page or "
+                        f"raise the Max-running limit, then try again.")
+            logger.info(f"[MCP:{server_name}] Lazy start on first call")
+            server.start(timeout=25)
 
         if not server.is_connected:
             self._record_health(full_tool_name, False, 0.0,
                                 server.error or "server offline")
+            AuditLog.record(full_tool_name, False, 0.0, arguments,
+                            server.error or "server offline")
             return f"Error: MCP server '{server_name}' is currently offline ({server.error or 'initializing'})."
 
+        gate = self._permission_gate(server, server_name, tool_name,
+                                     full_tool_name, arguments)
+        if gate is not None:
+            return gate
+
         t0 = time.perf_counter()
-        # Meta verbs for resources and prompts. These are NOT real tools on
-        # the server - they are Saturn synthesising a callable surface around
-        # the spec's resources/read and prompts/get methods so the LLM can
-        # actually use them.
-        if tool_name == "read_resource" and server.resources:
-            res = server.read_resource(arguments.get("uri", ""))
-        elif tool_name == "get_prompt" and server.prompts:
-            res = server.get_prompt(arguments.get("name", ""),
-                                    arguments.get("arguments") or {})
-        else:
-            res = server.call_tool(tool_name, arguments)
+        res = self._dispatch(server, tool_name, arguments)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         ok = bool(res.get("success"))
         err_msg = None if ok else str(res.get("error", "Unknown failure"))
         self._record_health(full_tool_name, ok, latency_ms, err_msg)
+        AuditLog.record(full_tool_name, ok, latency_ms, arguments, err_msg)
         if ok:
             return res.get("output", "Success")
         return f"MCP Tool Error: {err_msg}"
+
+    @staticmethod
+    def _dispatch(server: "MCPServerInstance", tool_name: str, arguments: dict) -> Dict[str, Any]:
+        """The real call, shared by the direct path and the confirmed path.
+
+        Meta verbs for resources and prompts. These are NOT real tools on
+        the server - they are Saturn synthesising a callable surface around
+        the spec's resources/read and prompts/get methods so the LLM can
+        actually use them. Safe to run on any thread: the JSON-RPC client
+        serialises writes itself, and the confirmation worker is a plain
+        thread outside the Qt and executor loops.
+        """
+        if tool_name == "read_resource" and server.resources:
+            return server.read_resource(arguments.get("uri", ""))
+        if tool_name == "get_prompt" and server.prompts:
+            return server.get_prompt(arguments.get("name", ""),
+                                     arguments.get("arguments") or {})
+        return server.call_tool(tool_name, arguments)
+
+    def _tool_declaration(self, server: "MCPServerInstance", tool_name: str) -> Dict[str, Any]:
+        """The manifest/live entry for one verb, so its declared ``requires``
+        reaches the permission classifier. Falls back to the bare name for
+        duck-typed test fakes and servers that never listed tools."""
+        entries = (getattr(server, "tools", None)
+                   or (server.load_manifest_tools()
+                       if hasattr(server, "load_manifest_tools") else [])
+                   or [])
+        for t in entries:
+            if isinstance(t, dict) and t.get("name") == tool_name:
+                return t
+        return {"name": tool_name}
+
+    def _permission_gate(self, server, server_name: str, tool_name: str,
+                         full_tool_name: str, arguments: dict) -> Optional[str]:
+        """Apply the tool's permission level; None means the call may proceed.
+
+        Only forged servers are gated: a hand-configured server was chosen by
+        the user with full knowledge of what it is, and retro-nagging those
+        would train the user to click through real warnings. Block refuses
+        outright. Ask parks the call behind core/confirm - the model cannot
+        forge that banner any more than it can forge a shutdown confirmation.
+        """
+        if not getattr(server, "is_forged", False):
+            return None
+        try:
+            from core import permissions
+            decl = self._tool_declaration(server, tool_name)
+            level = permissions.resolve(
+                server_name, tool_name,
+                requires=decl.get("requires") or [],
+                tool_name=tool_name,
+                description=str(decl.get("description", "")))
+        except Exception as exc:  # a broken gate must never brick the toolbelt
+            logger.debug(f"[MCP] permission gate skipped: {exc}")
+            return None
+
+        if level == permissions.BLOCK:
+            why = f"Blocked: tool '{tool_name}' is set to Block"
+            self._record_health(full_tool_name, False, 0.0, why)
+            AuditLog.record(full_tool_name, False, 0.0, arguments, why)
+            return (f"Blocked: the user set '{tool_name}' to Block on Saturn's "
+                    f"Creators page, so this call was refused. Do not retry it; "
+                    f"tell the user it is blocked and that they can change the "
+                    f"permission on the Creators page.")
+
+        if level != permissions.ASK:
+            return None
+
+        from core import confirm
+        if not confirm.is_bound():
+            # Headless (tests, CLI, early boot): nobody can see a banner, so
+            # asking would only refuse. Allow the call and keep the audit
+            # trail; the gate reappears the moment the HUD is wired.
+            logger.debug(f"[MCP:{server_name}] ask-gate skipped (no UI): {tool_name}")
+            return None
+        if confirm.pending_title():
+            return ("[CONFIRMATION_PENDING] Another confirmation is already on "
+                    f"screen, so '{tool_name}' has not been called yet. Ask the "
+                    "user to answer that confirmation first.")
+
+        def _run_confirmed() -> str:
+            t0 = time.perf_counter()
+            res = self._dispatch(server, tool_name, arguments)
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            ok = bool(res.get("success"))
+            err_msg = None if ok else str(res.get("error", "Unknown failure"))
+            self._record_health(full_tool_name, ok, latency_ms, err_msg)
+            AuditLog.record(full_tool_name, ok, latency_ms, arguments, err_msg)
+            if ok:
+                return str(res.get("output", "Success"))[:600]
+            return f"MCP Tool Error: {err_msg}"
+
+        key = f"mcp_{server_name}_{tool_name}"
+        needs = ", ".join(decl.get("requires") or []) or "see the Creators page"
+        detail = (f"Saturn built this tool itself and you set it to ask first. "
+                  f"Declared needs: {needs}.")
+        return confirm.request(key, f"Run {tool_name}?",
+                               f"Server '{server_name}' wants to call "
+                               f"'{tool_name}'. {detail}", _run_confirmed)
 
     @staticmethod
     def _record_health(tool_name: str, ok: bool, latency_ms: float, error: Optional[str]) -> None:
@@ -631,6 +891,17 @@ class UniversalMCPManager:
             CapabilityHealth.record(tool_name, ok, latency_ms, error)
         except Exception:
             pass
+
+    def _running_forged_count(self) -> int:
+        """How many forged servers are connected (resident) right now."""
+        n = 0
+        for srv in self._servers.values():
+            try:
+                if getattr(srv, "is_forged", False) and getattr(srv, "is_connected", False):
+                    n += 1
+            except Exception:
+                continue
+        return n
 
     # ── Server -> client request handlers (Saturn acting as MCP host) ────
 

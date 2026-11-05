@@ -45,6 +45,11 @@ class ToolRecord:
     successes: int = 0
     failures: int = 0
     recent: Deque[bool] = field(default_factory=lambda: deque(maxlen=10))
+    # Timestamped outcomes for the Creators page telemetry: (epoch_s, ok,
+    # latency_ms, error_or_None). Bounded so a long-lived session cannot
+    # grow memory without limit; 400 events cover the 14-day chart easily
+    # for human-scale traffic.
+    events: Deque[tuple] = field(default_factory=lambda: deque(maxlen=400))
     consecutive_failures: int = 0
     last_error: Optional[str] = None
     last_error_at: float = 0.0
@@ -56,6 +61,7 @@ class ToolRecord:
     def record(self, ok: bool, latency_ms: float, error: Optional[str]) -> None:
         self.calls += 1
         self.recent.append(ok)
+        self.events.append((time.time(), ok, latency_ms, (error or "")[:200] or None))
         if ok:
             self.successes += 1
             self.consecutive_failures = 0
@@ -94,6 +100,10 @@ class CapabilityHealth:
 
     _lock = threading.RLock()
     _records: Dict[str, ToolRecord] = {}
+    # Self-heal tally survives the record purge a reforge does, so the
+    # Creators page can still say "this server healed 3 times". Keyed by
+    # server (or feature) name, not by the individual tool verb.
+    _heal_counts: Dict[str, int] = {}
 
     # Tuning knobs (settable in tests).
     MIN_CALLS = 5
@@ -168,6 +178,85 @@ class CapabilityHealth:
                     out["healthy"] += 1
         return out
 
+    @classmethod
+    def tool_names_for(cls, capability: str, tier: str) -> List[str]:
+        """The recorded verb keys belonging to one capability.
+
+        * an MCP server owns every ``mcp_<capability>_*`` tool,
+        * a lightweight FEATURE is a single verb recorded under its own name.
+        """
+        with cls._lock:
+            if tier == "mcp":
+                prefix = f"mcp_{capability}_"
+                return [n for n in cls._records if n.startswith(prefix)]
+            return [capability] if capability in cls._records else []
+
+    @classmethod
+    def rollup(cls, capability: str, tier: str) -> Dict[str, object]:
+        """Aggregate a capability's events into the shapes the Creators page
+        draws: 24-hour and 14-day success/failure buckets, totals, latency,
+        the last five errors and a health verdict.
+
+        Everything is derived from the timestamped ``events`` deques so the
+        charts reflect real traffic, not the last-10 rolling window the
+        unhealthy-detector uses.
+        """
+        now = time.time()
+        names = cls.tool_names_for(capability, tier)
+        buckets_24 = [{"ok": 0, "failed": 0} for _ in range(24)]
+        buckets_14 = [{"ok": 0, "failed": 0} for _ in range(14)]
+        calls_14d = ok_14d = fail_14d = 0
+        lat_sum = lat_n = 0
+        last_used = 0.0
+        errors: List[Dict[str, object]] = []
+        any_unhealthy = any_failing = False
+        with cls._lock:
+            for n in names:
+                rec = cls._records.get(n)
+                if rec is None:
+                    continue
+                if rec.is_unhealthy(cls.MIN_CALLS, cls.CONSECUTIVE_THRESHOLD,
+                                    cls.FAILURE_RATE_THRESHOLD):
+                    any_unhealthy = True
+                    if rec.consecutive_failures >= cls.CONSECUTIVE_THRESHOLD:
+                        any_failing = True
+                for (ts, ok, lat, err) in rec.events:
+                    age = now - ts
+                    if age < 86400:
+                        b = buckets_24[min(23, int(age / 3600))]
+                        b["ok" if ok else "failed"] += 1
+                    if age < 14 * 86400:
+                        d = buckets_14[min(13, int(age / 86400))]
+                        d["ok" if ok else "failed"] += 1
+                        calls_14d += 1
+                        if ok:
+                            ok_14d += 1
+                        else:
+                            fail_14d += 1
+                    lat_sum += lat
+                    lat_n += 1
+                    last_used = max(last_used, ts)
+                    if not ok and err:
+                        errors.append({"at": ts, "tool": n, "message": err})
+        errors.sort(key=lambda e: e["at"], reverse=True)
+        health = "err" if any_failing else ("warn" if any_unhealthy else "ok")
+        return {
+            "health": health,
+            "calls_24h": list(reversed(buckets_24)),
+            "calls_14d": list(reversed(buckets_14)),
+            "calls_14d_total": calls_14d,
+            "success_pct": round(100.0 * ok_14d / calls_14d, 1) if calls_14d else 100.0,
+            "avg_latency_ms": round(lat_sum / lat_n, 1) if lat_n else 0.0,
+            "last_used_at": last_used,
+            "last_errors": errors[:5],
+            "heal_count": cls._heal_counts.get(capability, 0),
+        }
+
+    @classmethod
+    def note_heal(cls, capability: str) -> None:
+        with cls._lock:
+            cls._heal_counts[capability] = cls._heal_counts.get(capability, 0) + 1
+
     # ── Cooldown / marking ───────────────────────────────────────────────────
 
     @classmethod
@@ -217,6 +306,7 @@ class CapabilityHealth:
     def reset(cls) -> None:
         with cls._lock:
             cls._records.clear()
+            cls._heal_counts.clear()
 
     # ── Autonomous reforge loop ───────────────────────────────────────────
 
@@ -266,7 +356,10 @@ class CapabilityHealth:
                 continue
             cls.mark_reforge_offered(rec.name)
             evidence = cls.failure_evidence(rec.name)
-            goal = manifest.get("description") or f"Reforge {server}"
+            # Replay the user's original words when the forge stored them;
+            # a description-only guess loses the intent behind the tool.
+            goal = (manifest.get("goal") or manifest.get("description")
+                    or f"Reforge {server}")
             hint = (
                 "Auto-reforge triggered by Saturn's capability health "
                 f"monitor.\n{evidence}"
@@ -298,7 +391,9 @@ def _run_reforge(server_name: str, goal: str, hint: str) -> None:
         from core.mcp_forge import MCPForge
         MCPForge.forge_mcp_server(goal=goal, skill_name=server_name,
                                   context_hints=hint, max_repair_attempts=1)
-        # Reset stats for the server so the fresh copy starts clean.
+        # The fresh copy starts clean, but the heal tally is kept so the
+        # Creators page still shows how many times Saturn has repaired it.
+        CapabilityHealth.note_heal(server_name)
         with CapabilityHealth._lock:
             for k in list(CapabilityHealth._records.keys()):
                 if k.startswith(f"mcp_{server_name}_"):

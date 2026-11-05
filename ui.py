@@ -111,6 +111,12 @@ _PAGE_MEMORY = 6
 # index above keeps its owner.
 _PAGE_BRIEF = 7
 _PAGE_TASKS = 8
+# The Creators shelf (saturn_creators.html) - the rail's "Creators" row owns a
+# centre page like Tasks/Briefing, appended last so every index above holds.
+_PAGE_CREATORS = 9
+# Creator Tools (the design's crpage) - the MCP wiring bench the rail's
+# "Creator Tools" row owns, appended after Creators so every index above holds.
+_PAGE_TOOLS = 10
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -171,6 +177,8 @@ class C:
     BUBBLE_EDGE  = "rgba(255, 43, 214, 0.24)" # assistant bubble border
     ACC       = GOLD
     ACC2      = "#F5E94B"   # acid yellow - the design's secondary accent
+    FEATURE   = "#2BE4FF"   # feature cyan - the FEATURE tier badge / header count
+    FEATURE_D = "#006E84"   # light-mode feature cyan
     GREEN     = "#B6FF3B"   # listening green
     GREEN_D   = "#3F7D00"
     RED       = "#FF2B4A"   # error red
@@ -4433,6 +4441,1577 @@ class _ClickFrame(QFrame):
         super().mousePressEvent(ev)
 
 
+class _Sigil(QWidget):
+    """A capability's personal glyph: three broken rings seeded from its name,
+    magenta for MCP servers and feature-cyan for lightweight features. Static
+    (no timer) so it never spends the idle render budget; the mockup only spins
+    it on the hero and detail, and "Reduce effects" stops it there too."""
+
+    def __init__(self, name: str, tier: str, px: int = 40, parent=None):
+        super().__init__(parent)
+        self._name = name or ""
+        self._tier = tier
+        self.setFixedSize(px, px)
+
+    def paintEvent(self, _):
+        import hashlib
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        seed = int(hashlib.md5(self._name.encode("utf-8")).hexdigest()[:8], 16)
+        col = C.ACC if self._tier == "mcp" else C.FEATURE
+        p.setPen(QPen(_qcol(col), 1.4))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        cx, cy = self.width() / 2, self.height() / 2
+        for i in range(3):
+            r = (min(self.width(), self.height()) / 2) - 2 - i * 4
+            if r <= 1:
+                break
+            start = ((seed >> (i * 4)) % 12) * 30 + 40
+            span = 200 + ((seed >> (i * 3)) % 90)
+            p.drawArc(QRectF(cx - r, cy - r, 2 * r, 2 * r), start * 16, span * 16)
+        # core dot
+        p.setBrush(_qcol(col))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(cx, cy), 2.4, 2.4)
+        p.end()
+
+
+class _Sparkline(QWidget):
+    """The 24-bucket (or 14-bucket) stacked call history: dim bars for
+    succeeded calls, red for failures, so failures pop on a magenta card the
+    way the design wants. Empty buckets stay at baseline."""
+
+    def __init__(self, buckets, px_h: int = 26, parent=None):
+        super().__init__(parent)
+        self._b = list(buckets or [])
+        self.setFixedHeight(px_h)
+        self.setMinimumWidth(len(self._b) * 3)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def paintEvent(self, _):
+        if not self._b:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        n = len(self._b)
+        gap = 1
+        bw = max(1.0, (self.width() - gap * (n - 1)) / n)
+        peak = max(1, max((d.get("ok", 0) + d.get("failed", 0)) for d in self._b))
+        h = self.height()
+        for i, d in enumerate(self._b):
+            ok = d.get("ok", 0); fail = d.get("failed", 0)
+            x = i * (bw + gap)
+            tot = ok + fail
+            if tot == 0:
+                p.setPen(QPen(_qcol(C.BORDER), 1))
+                p.drawLine(int(x + bw / 2), h - 1, int(x + bw / 2), h - 1)
+                continue
+            full_h = max(2, round(h * tot / peak))
+            fail_h = round(full_h * fail / tot) if fail else 0
+            ok_h = full_h - fail_h
+            # failed stack on top (red), succeeded below (dim text)
+            p.setBrush(_qcol(C.RED)); p.setPen(Qt.PenStyle.NoPen)
+            if fail_h:
+                p.drawRect(QRectF(x, h - full_h, bw, fail_h))
+            p.setBrush(_qcol(C.TEXT_DIM))
+            if ok_h:
+                p.drawRect(QRectF(x, h - ok_h, bw, ok_h))
+        p.end()
+
+
+class CreatorsPage(QWidget):
+    """The CREATORS shelf - Saturn's capability surface, ported from
+    saturn_creators.html. One place to see every capability Saturn forged or
+    the user wired up, drill into its exposed verbs, read its live health
+    telemetry, and act on it (test, re-forge, copy the MCP config, open the
+    folder, unregister).
+
+    The whole page is data-driven off core.creators_catalog so the header
+    counts, the cards and the detail panel can never disagree. Nothing here is
+    faked: a manual server shows no source, an idle capability shows an empty
+    sparkline."""
+
+    forge_requested = pyqtSignal(str)             # goal text
+    reforge_requested = pyqtSignal(str, str)      # name, tier
+    open_tasks = pyqtSignal()
+
+    _HEALTH = {"ok": (C.GREEN, "\u25cf", "Healthy"),
+               "warn": (C.ACC2, "\u25c6", "Degraded"),
+               "err": (C.RED, "\u25b2", "Failing")}
+    _EXAMPLES = ("a portable MCP server for live cricket scores",
+                 "a feature that summarises today's weather",
+                 "an MCP server that reads my clipboard")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(
+            f"CreatorsPage {{ background: {C.PANEL}; border: none; }}"
+            f" CreatorsPage QLabel {{ background: transparent; border: none; }}"
+            f" CreatorsPage QFrame#ForgeBar {{ border: 1px solid {C.ACC};"
+            f" background: {C.PANEL2}; }}"
+            f" CreatorsPage QScrollArea {{ border: 1px solid {C.BORDER};"
+            f" background: transparent; }}"
+            f" CreatorsPage QScrollArea > QWidget > QWidget {{ background: transparent; }}")
+        self._all: list = []
+        self._sel_key = None
+        self._tier = "all"
+        self._health = "any"
+        self._query = ""
+        self._sort = "recent"
+        self._forging = False
+        self._undo = None
+        self._safety_state = {}
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 12)
+        root.setSpacing(10)
+        root.addLayout(self._build_header())
+        root.addWidget(self._build_safety_bar())
+        root.addLayout(self._build_forge_bar())
+        root.addWidget(self._build_stage_strip())
+        self._hero_host = QVBoxLayout(); self._hero_host.setSpacing(8)
+        self._hero_wrap = QHBoxLayout()
+        hero_wrap = QWidget(); hero_wrap.setLayout(self._hero_wrap); hero_wrap.setStyleSheet("background: transparent;")
+        self._hero_wrap.setSpacing(10)
+        root.addWidget(hero_wrap)
+        root.addLayout(self._build_shelf_toolbar())
+
+        # Body: 390px card rail + detail panel.
+        body = QHBoxLayout(); body.setSpacing(14)
+        self._list_scroll = QScrollArea(); self._list_scroll.setWidgetResizable(True)
+        self._list_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._list_inner = QWidget(); self._list_inner.setStyleSheet("background: transparent;")
+        self._list_lay = QVBoxLayout(self._list_inner); self._list_lay.setContentsMargins(2, 2, 2, 2)
+        self._list_lay.setSpacing(8); self._list_lay.addStretch(1)
+        self._list_scroll.setWidget(self._list_inner)
+        list_w = QWidget(); list_w.setFixedWidth(390); lw = QVBoxLayout(list_w)
+        lw.setContentsMargins(0, 0, 0, 0); lw.addWidget(self._list_scroll)
+        body.addWidget(list_w)
+
+        self._detail_scroll = QScrollArea(); self._detail_scroll.setWidgetResizable(True)
+        self._detail_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._detail_inner = QWidget(); self._detail_inner.setStyleSheet("background: transparent;")
+        self._detail_lay = QVBoxLayout(self._detail_inner); self._detail_lay.setContentsMargins(16, 14, 16, 14)
+        self._detail_lay.setSpacing(8); self._detail_lay.addStretch(1)
+        self._detail_scroll.setWidget(self._detail_inner)
+        body.addWidget(self._detail_scroll, 1)
+        root.addLayout(body, 1)
+
+        self._status = QLabel()
+        self._status.setFont(QFont(C.F_MONO, 8))
+        self._status.setStyleSheet(f"color: {C.TEXT_DIM}; min-height: 16px;"
+                                   f" border-top: 1px solid {C.BORDER}; padding-top: 4px;")
+        root.addWidget(self._status)
+
+        self.refresh()
+
+    # ── header ──────────────────────────────────────────────────────────────
+    def _build_header(self):
+        lay = QVBoxLayout(); lay.setSpacing(4)
+        top = QHBoxLayout()
+        top.addWidget(_ChromaTitle("CREATORS", 15))
+        top.addStretch(1)
+        self._hdr_counts = QLabel()
+        self._hdr_counts.setFont(QFont(C.F_MONO, 9))
+        self._hdr_counts.setTextFormat(Qt.TextFormat.RichText)
+        top.addWidget(self._hdr_counts)
+        lay.addLayout(top)
+        self._story = QLabel()
+        self._story.setFont(QFont(C.F_BODY, 9))
+        self._story.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(self._story)
+        self._kpi_row = QHBoxLayout(); self._kpi_row.setSpacing(10)
+        self._kpis = []
+        for label in ("Forged 30d", "Self-healed", "Calls 14d", "Lines Saturn wrote"):
+            card = QFrame(); card.setStyleSheet(
+                f"QFrame {{ border: 1px solid {C.BORDER}; background: {C.PANEL2}; }}")
+            cl = QVBoxLayout(card); cl.setContentsMargins(12, 8, 12, 8); cl.setSpacing(2)
+            val = QLabel("0"); val.setFont(QFont(C.F_DISPLAY, 16, QFont.Weight.Bold))
+            val.setStyleSheet(f"color: {C.ACC};")
+            cap = QLabel(label.upper()); cap.setFont(QFont(C.F_MONO, 7))
+            cap.setStyleSheet(f"color: {C.TEXT_DIM}; letter-spacing: 1px;")
+            cl.addWidget(val); cl.addWidget(cap)
+            self._kpi_row.addWidget(card)
+            self._kpis.append(val)
+        lay.addLayout(self._kpi_row)
+        return lay
+
+    def _build_forge_bar(self):
+        lay = QVBoxLayout(); lay.setSpacing(6)
+        bar = QFrame(); bar.setObjectName("ForgeBar")
+        bl = QHBoxLayout(bar); bl.setContentsMargins(10, 8, 10, 8); bl.setSpacing(8)
+        self._forge_input = QLineEdit()
+        self._forge_input.setPlaceholderText("Ask Saturn to forge a portable MCP server\u2026")
+        self._forge_input.setFont(QFont(C.F_BODY, 11))
+        self._forge_input.setStyleSheet(
+            f"QLineEdit {{ background: transparent; border: none; color: {C.TEXT}; }}")
+        self._forge_input.returnPressed.connect(self._do_forge)
+        bl.addWidget(self._forge_input, 1)
+        fb = QPushButton("FORGE"); fb.setCursor(Qt.CursorShape.PointingHandCursor)
+        fb.setStyleSheet(S.primary(size=12)); fb.clicked.connect(self._do_forge)
+        bl.addWidget(fb)
+        lay.addWidget(bar)
+        chips = QHBoxLayout(); chips.setSpacing(6)
+        chips.addWidget(self._dim("e.g.", 8))
+        for ex in self._EXAMPLES:
+            c = _mem_btn(ex, ink=C.FEATURE)
+            c.clicked.connect(lambda _=False, t=ex: self._forge_input.setText("make me " + t))
+            chips.addWidget(c)
+        chips.addStretch(1)
+        runs = self._dim("Runs as a task \u00b7 ", 8)
+        chips.addWidget(runs)
+        link = _mem_btn("OPEN TASKS", ink=C.ACC2)
+        link.clicked.connect(lambda: self.open_tasks.emit())
+        chips.addWidget(link)
+        lay.addLayout(chips)
+        return lay
+
+    def _build_stage_strip(self):
+        self._stages = QWidget(); self._stages.setVisible(False)
+        h = QHBoxLayout(self._stages); h.setContentsMargins(0, 2, 0, 2); h.setSpacing(8)
+        self._stage_labels = {}
+        for name in ("PLAN", "WRITE", "TEST", "REGISTER"):
+            lb = QLabel(name); lb.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold))
+            lb.setStyleSheet(f"color: {C.TEXT_DIM}; border: 1px solid {C.BORDER};"
+                             f" padding: 2px 8px;")
+            h.addWidget(lb); self._stage_labels[name] = lb
+        h.addStretch(1)
+        return self._stages
+
+    def _build_shelf_toolbar(self):
+        lay = QHBoxLayout(); lay.setSpacing(8)
+        self._search = QLineEdit(); self._search.setPlaceholderText("Search capabilities\u2026")
+        self._search.setFixedWidth(200); self._search.setFont(QFont(C.F_BODY, 9))
+        self._search.setStyleSheet(
+            f"QLineEdit {{ background: {C.PANEL2}; border: 1px solid {C.BORDER};"
+            f" color: {C.TEXT}; padding: 3px 8px; }}")
+        self._search.textChanged.connect(self._on_search)
+        lay.addWidget(self._search)
+        self._sort_box = QComboBox(); self._sort_box.addItems(
+            ["Recently forged", "Last used", "Most calls", "Needs attention"])
+        self._sort_box.currentIndexChanged.connect(self._on_sort)
+        lay.addWidget(self._sort_box)
+        lay.addStretch(1)
+        self._tier_btns = {}
+        for val, label in (("all", "All"), ("feature", "Feature"), ("mcp", "MCP server")):
+            b = _mem_btn(label.upper())
+            b.clicked.connect(lambda _=False, v=val: self._set_tier(v))
+            lay.addWidget(b); self._tier_btns[val] = b
+        return lay
+
+    # ── data ────────────────────────────────────────────────────────────────
+    def refresh(self):
+        try:
+            from core.creators_catalog import CreatorsCatalog, summary
+            self._all = CreatorsCatalog.build()
+            self._summ = summary(self._all)
+        except Exception as exc:
+            self._all = []; self._summ = {}
+            self._status.setText("Catalog unavailable: " + str(exc))
+        self._render_safety()
+        self._render_header()
+        self._render_heroes()
+        self._render_list()
+        self._render_detail()
+
+    def _render_header(self):
+        s = self._summ
+        self._hdr_counts.setText(
+            f'<span style="color:{C.FEATURE}">{s.get("features", 0)} skills</span>'
+            f'<span style="color:{C.TEXT_DIM}"> \u00b7 </span>'
+            f'<span style="color:{C.ACC}">{s.get("mcp_servers", 0)} MCP servers</span>'
+            f'<span style="color:{C.TEXT_DIM}"> \u00b7 </span>'
+            f'<span style="color:{C.GREEN}">{s.get("tools_live", 0)} tools live</span>')
+        self._story.setText(
+            f"{s.get('forged_30d', 0)} capabilities in the last 30 days, "
+            f"{s.get('self_healed', 0)} self-healed.")
+        for val, key in zip(self._kpis, ("forged_30d", "self_healed", "calls_14d", "lines_written")):
+            val.setText(f"{s.get(key, 0):,}")
+
+    def _render_heroes(self):
+        while self._hero_wrap.count():
+            it = self._hero_wrap.takeAt(0); w = it.widget()
+            if w is not None: w.deleteLater()
+        forged = [c for c in self._all if c.get("origin") == "forged"]
+        if not forged:
+            return
+        for cap in forged[:3]:
+            self._hero_wrap.addWidget(self._hero_card(cap))
+        self._hero_wrap.addStretch(1)
+
+    def _hero_card(self, cap):
+        card = _ClickFrame(); card.setFixedWidth(240)
+        col = C.ACC if cap["tier"] == "mcp" else C.FEATURE
+        card.setStyleSheet(f"QFrame {{ border: 1px solid {col}; background: {C.PANEL2}; }}")
+        v = QVBoxLayout(card); v.setContentsMargins(12, 10, 12, 10); v.setSpacing(5)
+        r1 = QHBoxLayout()
+        r1.addWidget(_Sigil(cap["name"], cap["tier"], 28))
+        import time as _t
+        is_new = (_t.time() - (cap.get("forged_at") or 0)) < 3600
+        if is_new:
+            r1.addWidget(_chip_label("NEW", C.GREEN))
+        r1.addStretch(1)
+        v.addLayout(r1)
+        nm = QLabel(cap["name"]); nm.setFont(QFont(C.F_BODY, 11, QFont.Weight.Bold))
+        nm.setStyleSheet(f"color: {C.TEXT};")
+        v.addWidget(nm)
+        d = QLabel(cap.get("description", "")); d.setFont(QFont(C.F_BODY, 8))
+        d.setStyleSheet(f"color: {C.TEXT_DIM};"); d.setWordWrap(True)
+        d.setMaximumHeight(30)
+        v.addWidget(d)
+        foot = QHBoxLayout()
+        foot.addWidget(self._health_dot(cap))
+        u = QLabel(self._used_label(cap)); u.setFont(QFont(C.F_MONO, 7))
+        u.setStyleSheet(f"color: {C.TEXT_DIM};"); foot.addWidget(u)
+        foot.addStretch(1)
+        foot.addWidget(_chip_label(f"{cap.get('tool_count', 0)} tools", col))
+        v.addLayout(foot)
+        v.addWidget(_Sparkline(cap.get("calls_24h"), 22))
+        card.clicked.connect(lambda c=cap: self._select_key(self._key(c)))
+        return card
+
+    def _filtered(self):
+        rows = list(self._all)
+        if self._tier != "all":
+            rows = [c for c in rows if c["tier"] == self._tier]
+        if self._health == "healed":
+            rows = [c for c in rows if c.get("heal_count", 0) > 0]
+        elif self._health != "any":
+            rows = [c for c in rows if c.get("health") == self._health]
+        if self._query:
+            q = self._query.lower()
+            rows = [c for c in rows if q in c["name"].lower() or q in (c.get("description") or "").lower()]
+        key_fn = {"recent": lambda c: c.get("forged_at") or 0,
+                  "used": lambda c: c.get("last_used_at") or 0,
+                  "calls": lambda c: c.get("calls_14d_total") or 0,
+                  "attention": lambda c: {"err": 2, "warn": 1, "ok": 0}.get(c.get("health"), 0)}
+        rows.sort(key=key_fn.get(self._sort, key_fn["recent"]), reverse=True)
+        return rows
+
+    def _render_list(self):
+        self._clear_lay(self._list_lay)
+        rows = self._filtered()
+        if not rows:
+            self._list_lay.addWidget(self._empty_state())
+        else:
+            for cap in rows:
+                self._list_lay.addWidget(self._shelf_card(cap))
+        self._list_lay.addStretch(1)
+
+    def _shelf_card(self, cap):
+        key = self._key(cap)
+        card = _ClickFrame()
+        sel = key == self._sel_key
+        col = C.ACC if cap["tier"] == "mcp" else C.FEATURE
+        card.setStyleSheet(f"QFrame {{ background: {C.HI if sel else C.PANEL2};"
+                           f" border: 1px solid {C.ACC if sel else C.BORDER}; }}")
+        v = QVBoxLayout(card); v.setContentsMargins(12, 10, 12, 10); v.setSpacing(5)
+        r1 = QHBoxLayout(); r1.setSpacing(8)
+        r1.addWidget(_Sigil(cap["name"], cap["tier"], 40))
+        nc = QVBoxLayout(); nc.setSpacing(1)
+        nm = QLabel(cap["name"]); nm.setFont(QFont(C.F_BODY, 11, QFont.Weight.Bold))
+        nm.setStyleSheet(f"color: {C.TEXT};"); nc.addWidget(nm)
+        tb = _chip_label("MCP SERVER" if cap["tier"] == "mcp" else "FEATURE", col)
+        tb.setFont(QFont(C.F_MONO, 7, QFont.Weight.Bold)); nc.addWidget(tb)
+        r1.addLayout(nc, 1); v.addLayout(r1)
+        d = QLabel(cap.get("description", "")); d.setFont(QFont(C.F_BODY, 9))
+        d.setStyleSheet(f"color: {C.TEXT_MED};"); d.setWordWrap(True)
+        d.setMaximumHeight(28); v.addWidget(d)
+        meta = QHBoxLayout(); meta.setSpacing(8)
+        meta.addWidget(self._health_dot(cap, text=True))
+        meta.addStretch(1)
+        verb = "1 verb" if cap["tier"] == "feature" else f"{cap.get('tool_count', 0)} tools"
+        vl = QLabel(verb + " \u00b7 " + self._used_label(cap)); vl.setFont(QFont(C.F_MONO, 7))
+        vl.setStyleSheet(f"color: {C.TEXT_DIM};"); meta.addWidget(vl)
+        if cap.get("heal_count", 0):
+            hl = QLabel("\u21bb" + str(cap["heal_count"])); hl.setFont(QFont(C.F_MONO, 7))
+            hl.setStyleSheet(f"color: {C.ACC2};"); meta.addWidget(hl)
+        v.addLayout(meta)
+        v.addWidget(_Sparkline(cap.get("calls_24h"), 24))
+        card.clicked.connect(lambda k=key: self._select_key(k))
+        return card
+
+    # ── detail ──────────────────────────────────────────────────────────────
+    def _render_detail(self):
+        self._clear_lay(self._detail_lay)
+        cap = self._by_key(self._sel_key) if self._sel_key else None
+        if cap is None:
+            forged = self._filtered()
+            cap = forged[0] if forged else None
+            if cap is not None:
+                self._sel_key = self._key(cap)
+        if cap is None:
+            self._detail_lay.addWidget(self._empty_state(large=True))
+            self._detail_lay.addStretch(1)
+            return
+        col = C.ACC if cap["tier"] == "mcp" else C.FEATURE
+        # title
+        head = QHBoxLayout(); head.setSpacing(12)
+        head.addWidget(_Sigil(cap["name"], cap["tier"], 48))
+        tc = QVBoxLayout(); tc.setSpacing(3)
+        ttl = QLabel(cap["name"]); ttl.setFont(QFont(C.F_BODY, 15, QFont.Weight.Bold))
+        ttl.setStyleSheet(f"color: {C.TEXT};"); tc.addWidget(ttl)
+        sub = QLabel((cap.get("folder") or "") + (f"  \u00b7  v{cap['version']}" if cap.get("version") else ""))
+        sub.setFont(QFont(C.F_MONO, 8)); sub.setStyleSheet(f"color: {C.TEXT_DIM};")
+        sub.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        tc.addWidget(sub)
+        badges = QHBoxLayout(); badges.setSpacing(8)
+        badges.addWidget(_chip_label("MCP SERVER" if cap["tier"] == "mcp" else "FEATURE", col))
+        badges.addWidget(self._health_chip(cap))
+        if cap.get("heal_count", 0):
+            badges.addWidget(_chip_label("\u21bb SELF-HEALED \u00d7" + str(cap["heal_count"]), C.ACC2))
+        badges.addStretch(1); tc.addLayout(badges)
+        head.addLayout(tc, 1)
+        self._detail_lay.addLayout(head)
+        # origin + description
+        origin = (f"Forged on {self._date(cap.get('forged_at'))}"
+                  if cap.get("origin") == "forged" else "Configured manually")
+        lu = cap.get("last_used_at") or 0
+        if lu:
+            origin += f"  \u00b7  last used {self._ago(lu)}"
+        ol = QLabel(origin); ol.setFont(QFont(C.F_MONO, 8)); ol.setStyleSheet(f"color: {C.TEXT_DIM};")
+        self._detail_lay.addWidget(ol)
+        dd = QLabel(cap.get("long_description") or cap.get("description") or "")
+        dd.setFont(QFont(C.F_BODY, 10)); dd.setStyleSheet(f"color: {C.TEXT_MED};")
+        dd.setWordWrap(True); self._detail_lay.addWidget(dd)
+        # "Made from" - the original goal text the forge was asked to fulfil,
+        # kept in the manifest so provenance survives every re-forge.
+        goal = (cap.get("goal") or "").strip()
+        if goal:
+            gl = QLabel("Made from:  \u201c" + goal[:160] + "\u201d")
+            gl.setFont(QFont(C.F_MONO, 8)); gl.setStyleSheet(f"color: {C.TEXT_DIM};")
+            gl.setWordWrap(True); self._detail_lay.addWidget(gl)
+        # health line
+        note = QLabel(cap.get("health_note", "")); note.setFont(QFont(C.F_BODY, 9))
+        note.setStyleSheet(f"color: {self._HEALTH.get(cap.get('health', 'ok'), self._HEALTH['ok'])[0]};")
+        note.setWordWrap(True); self._detail_lay.addWidget(note)
+        # actions
+        self._detail_lay.addLayout(self._build_actions(cap))
+        # exposed surface
+        self._detail_lay.addWidget(self._section("TOOLS, RESOURCES AND PROMPTS"))
+        self._detail_lay.addWidget(self._build_surface(cap))
+        # risk + declared-needs grid + the three trust callouts
+        if cap.get("origin") == "forged":
+            self._detail_lay.addWidget(self._section("ACCESS AND PERMISSIONS"))
+            self._detail_lay.addLayout(self._build_permissions_grid(cap))
+            self._detail_lay.addWidget(self._build_trust_callouts())
+        # telemetry
+        self._detail_lay.addWidget(self._section("TELEMETRY"))
+        self._detail_lay.addLayout(self._build_telemetry(cap))
+        errs = cap.get("last_errors") or []
+        if errs:
+            self._detail_lay.addWidget(self._section("LAST ERRORS"))
+            for e in errs:
+                el = QLabel(f"[{self._ago(e.get('at', 0))}] {e.get('tool', '')}: {e.get('message', '')[:120]}")
+                el.setFont(QFont(C.F_MONO, 8)); el.setStyleSheet(f"color: {C.RED};")
+                el.setWordWrap(True); self._detail_lay.addWidget(el)
+        # version history + audit trail (forged provenance only)
+        if cap.get("origin") == "forged":
+            hist = cap.get("version_history") or []
+            if hist:
+                self._detail_lay.addWidget(self._section("VERSION HISTORY"))
+                self._detail_lay.addWidget(self._build_version_history(cap, hist))
+            aud = cap.get("audit") or []
+            self._detail_lay.addWidget(self._section("RECENT CALLS"))
+            self._detail_lay.addWidget(self._build_audit_table(cap, aud))
+        # source viewer
+        src = cap.get("source_path")
+        if src:
+            self._detail_lay.addWidget(self._section("SOURCE SATURN WROTE"))
+            self._detail_lay.addWidget(self._build_source(src))
+        self._detail_lay.addStretch(1)
+
+    def _build_actions(self, cap):
+        row = QHBoxLayout(); row.setSpacing(8)
+        tb = _mem_btn("TEST A CALL", ink=C.GREEN, edge=C.GREEN)
+        tb.clicked.connect(lambda c=cap: self._test_call(c)); row.addWidget(tb)
+        rb = _mem_btn("REFORGE", ink=C.ACC2, edge=C.ACC2)
+        rb.setEnabled(bool(cap.get("can_reforge")))
+        if not rb.isEnabled(): rb.setToolTip("Manually configured server - no source to re-forge")
+        rb.clicked.connect(lambda c=cap: self._reforge(c)); row.addWidget(rb)
+        cb = _mem_btn("COPY MCP CONFIG JSON")
+        cb.setEnabled(bool(cap.get("can_copy_config")))
+        if not cb.isEnabled(): cb.setToolTip("Runs inside Saturn only")
+        cb.clicked.connect(lambda c=cap: self._copy_config(c)); row.addWidget(cb)
+        ob = _mem_btn("OPEN FOLDER")
+        ob.setEnabled(bool(cap.get("folder")))
+        ob.clicked.connect(lambda c=cap: self._open_folder(c)); row.addWidget(ob)
+        ub = _mem_btn("UNREGISTER", ink=C.RED, edge=C.RED)
+        ub.clicked.connect(lambda c=cap: self._unregister(c)); row.addWidget(ub)
+        row.addStretch(1)
+        return row
+
+    def _build_surface(self, cap):
+        host = QFrame(); v = QVBoxLayout(host); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(6)
+        if cap["tier"] == "feature" or not (cap.get("resources") or cap.get("prompts")):
+            for t in cap.get("tools", []):
+                v.addWidget(self._tool_row(t, cap))
+            if not cap.get("tools"):
+                v.addWidget(self._dim("No verbs exposed (server offline or not connected).", 8))
+        else:
+            tabs = QHBoxLayout(); tabs.setSpacing(6)
+            stack = QStackedWidget()
+            for i, (label, items, kind) in enumerate((
+                    ("TOOLS", cap.get("tools", []), "tool"),
+                    ("RESOURCES", cap.get("resources", []), "resource"),
+                    ("PROMPTS", cap.get("prompts", []), "prompt"))):
+                b = _mem_btn(f"{label} ({len(items)})")
+                page = QWidget(); pl = QVBoxLayout(page); pl.setContentsMargins(0, 6, 0, 0); pl.setSpacing(6)
+                if not items:
+                    pl.addWidget(self._dim("None advertised.", 8))
+                for it in items:
+                    if kind == "tool": pl.addWidget(self._tool_row(it, cap))
+                    elif kind == "resource": pl.addWidget(self._kv_row(it.get("uri", ""), it.get("description", "")))
+                    else: pl.addWidget(self._kv_row(it.get("name", ""), it.get("description", "")))
+                pl.addStretch(1)
+                stack.addWidget(page)
+                b.clicked.connect(lambda _=False, ix=i, s=stack, bs=tabs: self._pick_tab(s, ix, bs))
+                tabs.addWidget(b)
+            tabs.addStretch(1)
+            v.addLayout(tabs); v.addWidget(stack)
+            if tabs.count():
+                self._pick_tab(stack, 0, tabs)
+        return host
+
+    def _pick_tab(self, stack, ix, tabs_layout):
+        stack.setCurrentIndex(ix)
+        for i in range(tabs_layout.count()):
+            w = tabs_layout.itemAt(i).widget()
+            if isinstance(w, QPushButton):
+                w.setStyleSheet(_mem_btn_style(i == ix, ink=C.ACC if i == ix else None))
+
+    def _tool_row(self, tool, cap=None):
+        box = QFrame(); box.setStyleSheet(f"QFrame {{ border: 1px solid {C.BORDER}; }}")
+        v = QVBoxLayout(box); v.setContentsMargins(10, 8, 10, 8); v.setSpacing(4)
+        nm = QLabel(tool.get("name", "")); nm.setFont(QFont(C.F_MONO, 9, QFont.Weight.Bold))
+        nm.setStyleSheet(f"color: {C.TEXT};")
+        head = QHBoxLayout(); head.setSpacing(8)
+        head.addWidget(nm); head.addStretch(1)
+        # ACCESS + PERMISSION live on the right of the verb name, exactly as
+        # the design's tool table lays them out. Only forged verbs are gated;
+        # a hand-configured server is the user's own choice and shows "n/a".
+        forged = bool(cap and cap.get("origin") == "forged")
+        perm = tool.get("permission") or {}
+        for need in (perm.get("declared_requires") or tool.get("requires") or []):
+            head.addWidget(_chip_label(str(need).upper(), C.ACC2))
+        if forged:
+            head.addWidget(self._perm_combo(cap, tool))
+        elif cap is not None:
+            na = QLabel("not gated"); na.setFont(QFont(C.F_MONO, 7))
+            na.setStyleSheet(f"color: {C.TEXT_DIM};"); head.addWidget(na)
+        v.addLayout(head)
+        if tool.get("description"):
+            d = QLabel(tool["description"]); d.setFont(QFont(C.F_BODY, 9))
+            d.setStyleSheet(f"color: {C.TEXT_MED};"); d.setWordWrap(True); v.addWidget(d)
+        params = tool.get("params") or []
+        if params:
+            for pr in params:
+                req = "required" if pr.get("required") else str(pr.get("default") if pr.get("default") is not None else "optional")
+                line = QLabel(f"  \u00b7 {pr['name']} : {pr['type']} ({req}) \u2014 {pr.get('description','')}")
+                line.setFont(QFont(C.F_MONO, 8)); line.setStyleSheet(f"color: {C.TEXT_DIM};")
+                line.setWordWrap(True); v.addWidget(line)
+        return box
+
+    def _perm_combo(self, cap, tool):
+        """The Always allow / Ask each time / Block select for one verb.
+
+        Writes straight to the permission store through the catalog's single
+        write seam, then re-renders so the risk badge and the engine's next
+        call agree with what the user just picked."""
+        from core import permissions
+        cb = QComboBox(); cb.setFont(QFont(C.F_MONO, 8))
+        for lvl, label in ((permissions.ALLOW, "Always allow"),
+                           (permissions.ASK, "Ask each time"),
+                           (permissions.BLOCK, "Block")):
+            cb.addItem(label, lvl)
+        cur = (tool.get("permission") or {}).get("level", permissions.ALLOW)
+        idx = {permissions.ALLOW: 0, permissions.ASK: 1, permissions.BLOCK: 2}.get(cur, 0)
+        cb.setCurrentIndex(idx)
+        tone = {permissions.ALLOW: C.GREEN, permissions.ASK: C.ACC2, permissions.BLOCK: C.RED}[cur]
+        cb.setStyleSheet(
+            f"QComboBox {{ background: {C.PANEL2}; border: 1px solid {tone};"
+            f" color: {tone}; padding: 1px 6px; }}"
+            f"QComboBox QAbstractItemView {{ background: {C.PANEL2};"
+            f" color: {C.TEXT}; border: 1px solid {C.BORDER}; selection:" + tone + "; }}")
+        cb.currentIndexChanged.connect(
+            lambda _=False, c=cap, t=tool, box=cb: self._apply_permission(c, t, box))
+        return cb
+
+    def _apply_permission(self, cap, tool, box):
+        from core.creators_catalog import CreatorsCatalog
+        level = box.currentData()
+        try:
+            from core import permissions
+            # Choosing Saturn's own classified default clears the override so
+            # the row tracks re-forge instead of pinning a stale choice.
+            if level == (tool.get("permission") or {}).get("default"):
+                CreatorsCatalog.set_permission(cap["name"], tool["name"], None)
+            else:
+                CreatorsCatalog.set_permission(cap["name"], tool["name"], level)
+        except Exception as exc:
+            self._status.setText("Could not save permission: " + str(exc)[:120]); return
+        self._render_safety()
+        self._render_list()
+        self._render_detail()
+        lbl = box.currentText().upper()
+        self._status.setText(f"{cap['name']} \u00b7 {tool['name']}: {lbl}")
+
+    def _kv_row(self, k, val):
+        row = QHBoxLayout()
+        kk = QLabel(k); kk.setFont(QFont(C.F_MONO, 9)); kk.setStyleSheet(f"color: {C.ACC};"); row.addWidget(kk)
+        vv = QLabel(val or ""); vv.setFont(QFont(C.F_BODY, 9)); vv.setStyleSheet(f"color: {C.TEXT_MED};")
+        vv.setWordWrap(True); row.addWidget(vv, 1)
+        wrap = QFrame(); wrap.setStyleSheet(f"QFrame {{ border: 1px solid {C.BORDER}; }}")
+        wl = QVBoxLayout(wrap); wl.setContentsMargins(10, 6, 10, 6); wl.addLayout(row)
+        return wrap
+
+    def _build_telemetry(self, cap):
+        grid = QHBoxLayout(); grid.setSpacing(10)
+        stats = (("Calls 14d", str(cap.get("calls_14d_total", 0))),
+                 ("Success", f"{cap.get('success_pct', 100.0):.0f}%"),
+                 ("Avg latency", f"{cap.get('avg_latency_ms', 0):.0f} ms"),
+                 ("Self-heals", str(cap.get("heal_count", 0))))
+        for label, val in stats:
+            card = QFrame(); card.setStyleSheet(f"QFrame {{ border: 1px solid {C.BORDER}; background: {C.PANEL2}; }}")
+            cl = QVBoxLayout(card); cl.setContentsMargins(10, 6, 10, 6); cl.setSpacing(1)
+            vv = QLabel(val); vv.setFont(QFont(C.F_DISPLAY, 13, QFont.Weight.Bold))
+            vv.setStyleSheet(f"color: {C.TEXT};"); cl.addWidget(vv)
+            ll = QLabel(label.upper()); ll.setFont(QFont(C.F_MONO, 7))
+            ll.setStyleSheet(f"color: {C.TEXT_DIM};"); cl.addWidget(ll)
+            grid.addWidget(card)
+        return grid
+
+    def _build_source(self, path):
+        host = QVBoxLayout(); host.setSpacing(4)
+        txt = QPlainTextEdit(); txt.setReadOnly(True); txt.setFixedHeight(90)
+        txt.setFont(QFont(C.F_MONO, 8))
+        txt.setStyleSheet(f"QPlainTextEdit {{ background: {C.BG}; border: 1px solid {C.BORDER};"
+                          f" color: {C.TEXT_DIM}; }}")
+        peek = ""
+        try:
+            lines = open(path, encoding="utf-8", errors="ignore").read().splitlines()
+            peek = "\n".join(lines[:6])
+            if len(lines) > 6: peek += f"\n\u2026 ({len(lines)} lines)"
+            full = "\n".join(lines)
+        except Exception as exc:
+            full = peek = f"(could not read source: {exc})"
+        txt.setPlainText(peek)
+        host.addWidget(txt)
+        cb = _mem_btn("SHOW ALL")
+        def _toggle():
+            if txt.maximumHeight() <= 90:
+                txt.setFixedHeight(min(360, 16 * len(full.splitlines()))); cb.setText("COLLAPSE")
+            else:
+                txt.setFixedHeight(90); txt.setPlainText(peek); cb.setText("SHOW ALL")
+        cb.clicked.connect(_toggle)
+        copy = _mem_btn("COPY")
+        copy.clicked.connect(lambda: self._copy_text(full, "source"))
+        r = QHBoxLayout(); r.addWidget(cb); r.addWidget(copy); r.addStretch(1)
+        host.addLayout(r)
+        wrap = QWidget(); wrap.setLayout(host); return wrap
+
+    # ── safety bar ────────────────────────────────────────────────────────────
+    def _build_safety_bar(self):
+        """The page's safety control (design .cectl): kill switch, live running
+        count, the concurrency cap and the lazy note - plus a red banner that
+        only appears when forged tools are switched off."""
+        wrap = QFrame(); wrap.setObjectName("SafetyBar")
+        wrap.setStyleSheet(f"QFrame#SafetyBar {{ border: 1px solid {C.BORDER};"
+                           f" background: {C.PANEL2}; }}"
+                           f" QFrame#SafetyBar QLabel {{ background: transparent; }}")
+        outer = QVBoxLayout(wrap); outer.setContentsMargins(12, 8, 12, 8); outer.setSpacing(6)
+        row = QHBoxLayout(); row.setSpacing(10)
+        eb = QLabel("SAFETY"); eb.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold))
+        eb.setStyleSheet(f"color: {C.TEXT_DIM}; letter-spacing: 2px;"); row.addWidget(eb)
+        self._safety_switch = QPushButton("● FORGED TOOLS: ON")
+        self._safety_switch.setCheckable(True); self._safety_switch.setChecked(True)
+        self._safety_switch.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._safety_switch.clicked.connect(self._on_safety_toggle)
+        row.addWidget(self._safety_switch)
+        self._running_lbl = QLabel("Running now: 0 of 0")
+        self._running_lbl.setFont(QFont(C.F_MONO, 8))
+        self._running_lbl.setStyleSheet(f"color: {C.TEXT_DIM};"); row.addWidget(self._running_lbl)
+        row.addStretch(1)
+        row.addWidget(self._dim("Max running", 8))
+        self._max_run = QComboBox(); self._max_run.setFont(QFont(C.F_MONO, 8))
+        self._max_run.addItems(["2", "4", "6", "8"])
+        self._max_run.setStyleSheet(
+            f"QComboBox {{ background: {C.PANEL}; border: 1px solid {C.BORDER};"
+            f" color: {C.TEXT}; padding: 1px 6px; }}"
+            f"QComboBox QAbstractItemView {{ background: {C.PANEL2}; color: {C.TEXT};"
+            f" border: 1px solid {C.BORDER}; }}")
+        self._max_run.currentTextChanged.connect(self._on_max_running)
+        row.addWidget(self._max_run)
+        row.addWidget(self._dim("Servers start only when called, to save memory.", 8))
+        outer.addLayout(row)
+        self._safety_banner = QLabel(
+            "Forged tools are OFF. Saturn will refuse to run any capability it "
+            "built for itself until you switch them back on.")
+        self._safety_banner.setWordWrap(True)
+        self._safety_banner.setFont(QFont(C.F_BODY, 9))
+        self._safety_banner.setStyleSheet(
+            f"QLabel {{ color: {C.RED}; border: 1px solid {C.RED};"
+            f" background: rgba(255,43,74,0.08); padding: 6px 8px; }}")
+        self._safety_banner.setVisible(False)
+        outer.addWidget(self._safety_banner)
+        return wrap
+
+    def _render_safety(self):
+        try:
+            from core.creators_catalog import CreatorsCatalog
+            st = CreatorsCatalog.safety_state(self._all)
+        except Exception:
+            st = {}
+        self._safety_state = st
+        on = bool(st.get("forged_tools_enabled", True))
+        tone = C.GREEN if on else C.RED
+        self._safety_switch.blockSignals(True)
+        self._safety_switch.setChecked(on)
+        self._safety_switch.setText("● FORGED TOOLS: ON" if on else "○ FORGED TOOLS: OFF")
+        self._safety_switch.blockSignals(False)
+        self._safety_switch.setStyleSheet(
+            f"QPushButton {{ color: {tone}; border: 1px solid {tone};"
+            f" background: transparent; padding: 2px 10px; }}")
+        self._running_lbl.setText(
+            f"Running now: {st.get('running', 0)} of {st.get('forged_servers', 0)}")
+        mr = str(st.get("max_running", 4))
+        if mr in [self._max_run.itemText(i) for i in range(self._max_run.count())]:
+            self._max_run.blockSignals(True); self._max_run.setCurrentText(mr)
+            self._max_run.blockSignals(False)
+        self._safety_banner.setVisible(not on)
+
+    def _on_safety_toggle(self, checked):
+        try:
+            from memory.config_manager import set_setting
+            set_setting("forged_tools_enabled", bool(checked))
+        except Exception as exc:
+            self._status.setText("Could not save setting: " + str(exc)[:120]); return
+        self._render_safety(); self._render_list(); self._render_detail()
+        self._status.setText("Forged tools are now " + ("ON." if checked else "OFF."))
+
+    def _on_max_running(self, text):
+        try:
+            from memory.config_manager import set_setting
+            set_setting("forged_max_running", int(text))
+        except Exception:
+            return
+        self._render_safety()
+
+    # ── access / permissions detail ───────────────────────────────────────────
+    _RISK_COL = {"LOW": C.GREEN, "MEDIUM": C.ACC2, "HIGH": C.RED}
+
+    def _build_permissions_grid(self, cap):
+        """NETWORK / FILES / COMMANDS / WHAT IS ENFORCED, from the declared
+        needs the catalog computed - never an invented OS limit."""
+        grid = QHBoxLayout(); grid.setSpacing(10)
+        needs = set(cap.get("declared_needs") or [])
+        for label, key in (("NETWORK", "network"), ("FILES", "files"),
+                           ("COMMANDS", "commands")):
+            on = key in needs
+            grid.addWidget(self._perm_cell(label, "YES" if on else "\u2014",
+                                           C.ACC2 if on else C.TEXT_DIM))
+        grid.addWidget(self._perm_cell("SANDBOX", "APPROVAL", C.ACC))
+        risk = cap.get("risk", "LOW")
+        rb = _chip_label("RISK: " + risk, self._RISK_COL.get(risk, C.TEXT_DIM))
+        rb.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold))
+        grid.addWidget(rb)
+        grid.addStretch(1)
+        return grid
+
+    def _perm_cell(self, label, value, color):
+        card = QFrame(); card.setStyleSheet(
+            f"QFrame {{ border: 1px solid {C.BORDER}; background: {C.PANEL2}; }}")
+        cl = QVBoxLayout(card); cl.setContentsMargins(10, 6, 10, 6); cl.setSpacing(1)
+        vv = QLabel(value); vv.setFont(QFont(C.F_DISPLAY, 12, QFont.Weight.Bold))
+        vv.setStyleSheet(f"color: {color};"); cl.addWidget(vv)
+        ll = QLabel(label); ll.setFont(QFont(C.F_MONO, 7))
+        ll.setStyleSheet(f"color: {C.TEXT_DIM}; letter-spacing: 1px;"); cl.addWidget(ll)
+        card.setFixedWidth(96)
+        if label == "SANDBOX":
+            card.setToolTip(
+                "What Saturn really enforces:\n\u2022 " +
+                "\n\u2022 ".join(["Approval gating on risky calls",
+                                "Secret-free environment for server processes",
+                                "Every call recorded in the audit trail"]))
+        return card
+
+    def _build_trust_callouts(self):
+        box = QVBoxLayout(); box.setSpacing(6)
+        notes = (
+            "Every verb declares what it touches, in its manifest. Saturn gates "
+            "calls on that declaration - it will not run past the permission you set.",
+            "Secrets never travel into a forged server. Child processes get a "
+            "minimal, key-free environment; your API keys stay in Saturn's secure store.",
+            "Results are data, never instructions. Whatever a tool returns is "
+            "treated as information, not a command Saturn has to obey.")
+        for n in notes:
+            f = QFrame(); f.setStyleSheet(
+                f"QFrame {{ border: none; border-left: 3px solid {C.ACC}; }}")
+            fl = QHBoxLayout(f); fl.setContentsMargins(10, 4, 4, 4)
+            lb = QLabel(n); lb.setWordWrap(True); lb.setFont(QFont(C.F_BODY, 9))
+            lb.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+            fl.addWidget(lb); box.addWidget(f)
+        wrap = QWidget(); wrap.setLayout(box); return wrap
+
+    def _build_version_history(self, cap, hist):
+        box = QFrame(); box.setStyleSheet(f"QFrame {{ border: 1px solid {C.BORDER}; }}")
+        v = QVBoxLayout(box); v.setContentsMargins(10, 6, 10, 6); v.setSpacing(3)
+        for h in hist:
+            at = h.get("at") or 0
+            when = self._date(at) if at else "\u2014"
+            line = QLabel(f"v{h.get('version','')}  \u00b7  {h.get('state','')}  \u00b7  {when}")
+            line.setFont(QFont(C.F_MONO, 8))
+            line.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+            v.addWidget(line)
+        return box
+
+    def _build_audit_table(self, cap, aud):
+        if not aud:
+            return self._dim("No calls recorded yet.", 8)
+        box = QFrame(); box.setStyleSheet(f"QFrame {{ border: 1px solid {C.BORDER}; }}")
+        v = QVBoxLayout(box); v.setContentsMargins(10, 6, 10, 6); v.setSpacing(2)
+        import datetime
+        hdr = QLabel("TIME             TOOL                 RESULT       TAKEN")
+        hdr.setFont(QFont(C.F_MONO, 7, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
+        v.addWidget(hdr)
+        for e in aud[:8]:
+            ts = e.get("ts") or 0
+            when = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "--:--:--"
+            ok = bool(e.get("ok"))
+            result = "OK" if ok else ("BLOCKED" if str(e.get("error", "")).startswith("Blocked") else "ERROR")
+            col = C.GREEN if ok else (C.ACC2 if result == "BLOCKED" else C.RED)
+            args = e.get("args") or {}
+            astr = (", ".join(f"{k}={'***' if 'key' in str(k).lower() or 'token' in str(k).lower() else str(v)[:12]}"
+                              for k, v in list(args.items())[:3]) or "\u2014")
+            row = QLabel(f"{when:<15} {str(e.get('tool','')):<18} {result:<10} {e.get('duration_ms',0):.0f} ms   {astr}")
+            row.setFont(QFont(C.F_MONO, 8))
+            row.setStyleSheet(f"color: {col}; background: transparent; border: none;")
+            v.addWidget(row)
+        return box
+
+    # ── empty state ─────────────────────────────────────────────────────────
+    def _empty_state(self, large: bool = False):
+        box = QFrame(); box.setStyleSheet(
+            f"QFrame {{ border: 1px dashed {C.BORDER}; }}")
+        v = QVBoxLayout(box); v.setContentsMargins(20, 24, 20, 24); v.setSpacing(8)
+        v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sig = _Sigil("cricket", "mcp", 96 if large else 64)
+        v.addWidget(sig, 0, Qt.AlignmentFlag.AlignCenter)
+        t = QLabel("NOTHING FORGED YET"); t.setFont(QFont(C.F_DISPLAY, 14, QFont.Weight.Bold))
+        t.setStyleSheet(f"color: {C.TEXT};"); v.addWidget(t, 0, Qt.AlignmentFlag.AlignCenter)
+        line = QLabel("Ask Saturn: \u201cMake me a portable MCP server for cricket scores\u201d"
+                      " and watch it build itself one.")
+        line.setWordWrap(True); line.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        line.setFont(QFont(C.F_BODY, 10)); line.setStyleSheet(f"color: {C.TEXT_MED};")
+        v.addWidget(line)
+        v.addStretch(1)
+        return box
+
+    # ── actions ─────────────────────────────────────────────────────────────
+    def _do_forge(self):
+        goal = self._forge_input.text().strip()
+        if not goal:
+            self._status.setText("Describe what the capability should do first.")
+            return
+        self._forge_input.clear()
+        self._status.setText("Forging: " + goal)
+        self.forge_requested.emit(goal)
+
+    def begin_forging(self):
+        self._forging = True; self._stages.setVisible(True)
+        for i, lb in enumerate(self._stage_labels.values()):
+            lb.setStyleSheet(f"color: {C.TEXT_DIM}; border: 1px solid {C.BORDER}; padding: 2px 8px;")
+            lb.setText(["PLAN", "WRITE", "TEST", "REGISTER"][i])
+        self._advance_stage(0)
+
+    def _advance_stage(self, idx):
+        names = ["PLAN", "WRITE", "TEST", "REGISTER"]
+        for i, name in enumerate(names):
+            lb = self._stage_labels[name]
+            lb.setStyleSheet(f"color: {C.ACC if i == idx else C.TEXT_DIM};"
+                             f" border: 1px solid {C.ACC if i <= idx else C.BORDER};"
+                             f" padding: 2px 8px;")
+
+    def end_forging(self):
+        self._forging = False; self._stages.setVisible(False); self.refresh()
+
+    def _test_call(self, cap):
+        try:
+            if cap["tier"] == "mcp":
+                from core.mcp_manager import UniversalMCPManager
+                if not cap.get("tools"):
+                    self._status.setText("Nothing to test - server is offline."); return
+                tool = cap["tools"][0]["name"]
+                res = UniversalMCPManager.get_instance().execute_mcp_tool(
+                    f"mcp_{cap['name']}_{tool}", {})
+            else:
+                from core.dynamic_registry import DynamicToolRegistry
+                res = DynamicToolRegistry.execute_sync(cap["name"])
+            self._status.setText("Test result: " + str(res)[:200])
+            self.refresh()
+        except Exception as exc:
+            self._status.setText("Test failed: " + str(exc)[:200])
+
+    def _reforge(self, cap):
+        self.reforge_requested.emit(cap["name"], cap["tier"])
+        self._status.setText("Re-forging " + cap["name"] + "\u2026")
+
+    def _copy_config(self, cap):
+        cfg = {cap["name"]: cap.get("config") or {}}
+        text = json.dumps(cfg, indent=2)
+        self._copy_text(text, "MCP config JSON")
+
+    def _copy_text(self, text, what):
+        try:
+            QApplication.clipboard().setText(text)
+            self._status.setText("Copied " + what + " to the clipboard.")
+        except Exception as exc:
+            self._status.setText("Copy failed: " + str(exc)[:160])
+
+    def _open_folder(self, cap):
+        folder = cap.get("folder")
+        if not folder:
+            self._status.setText("No folder for this capability."); return
+        try:
+            import subprocess, sys
+            if sys.platform.startswith("win"):
+                subprocess.Popen(["explorer", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+            self._status.setText("Opened " + folder)
+        except Exception as exc:
+            self._status.setText("Could not open folder: " + str(exc)[:160])
+
+    def _unregister(self, cap):
+        name, tier = cap["name"], cap["tier"]
+        try:
+            if tier == "mcp":
+                from core.mcp_manager import UniversalMCPManager
+                cfg = dict(cap.get("config") or {})
+                UniversalMCPManager.get_instance().hot_unregister(name)
+                self._undo = ("mcp", name, cfg)
+            else:
+                from core.dynamic_registry import DynamicToolRegistry
+                DynamicToolRegistry.toggle_skill(name, False)
+                self._undo = ("feature", name, {})
+            self.refresh()
+            self._status.setText(f"Unregistered '{name}'.")
+            QTimer.singleShot(9000, lambda: setattr(self, "_undo", None))
+        except Exception as exc:
+            self._status.setText("Unregister failed: " + str(exc)[:200])
+
+    # ── small helpers ────────────────────────────────────────────────────────
+    @staticmethod
+    def _key(cap):
+        return f"{cap['tier']}::{cap['name']}"
+
+    def _by_key(self, key):
+        for c in self._all:
+            if self._key(c) == key:
+                return c
+        return None
+
+    def _select_key(self, key):
+        self._sel_key = key
+        self._render_list()
+        self._render_detail()
+
+    def select_capability(self, name: str, tier: str):
+        """Public entry so another page (e.g. a forged Tasks workspace) can jump
+        straight to a capability's detail. Refreshes first so a just-forged row is
+        present, then selects it even when a tier filter would hide it."""
+        self.refresh()
+        key = self._key({"tier": tier, "name": name})
+        if self._by_key(key) is None:
+            return False
+        # Clear filters that could hide the target, then select.
+        self._tier = "all"
+        self._query = ""
+        self._health = "any"
+        for k, b in getattr(self, "_tier_btns", {}).items():
+            b.setStyleSheet(_mem_btn_style(k == "all", ink=C.ACC if k == "all" else None))
+        self._select_key(key)
+        return True
+
+    def _set_tier(self, val):
+        self._tier = val
+        for k, b in self._tier_btns.items():
+            b.setStyleSheet(_mem_btn_style(k == val, ink=C.ACC if k == val else None))
+        self._render_list()
+
+    def _on_search(self, text):
+        self._query = text; self._render_list()
+
+    def _on_sort(self, idx):
+        self._sort = ("recent", "used", "calls", "attention")[idx]
+        self._render_list()
+
+    def _health_dot(self, cap, text: bool = False):
+        h = cap.get("health", "ok")
+        col, glyph, label = self._HEALTH.get(h, self._HEALTH["ok"])
+        lb = QLabel((glyph + (" " + label if text and h != "ok" else "")))
+        lb.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold)); lb.setStyleSheet(f"color: {col};")
+        return lb
+
+    def _health_chip(self, cap):
+        h = cap.get("health", "ok")
+        col, glyph, label = self._HEALTH.get(h, self._HEALTH["ok"])
+        return _chip_label(glyph + " " + label.upper(), col)
+
+    def _used_label(self, cap):
+        lu = cap.get("last_used_at") or 0
+        return self._ago(lu) if lu else "never used"
+
+    @staticmethod
+    def _ago(ts):
+        import time as _t
+        d = _t.time() - ts
+        if d < 60: return "just now"
+        if d < 3600: return f"{int(d // 60)}m ago"
+        if d < 86400: return f"{int(d // 3600)}h ago"
+        return f"{int(d // 86400)}d ago"
+
+    @staticmethod
+    def _date(ts):
+        if not ts: return "\u2014"
+        import datetime
+        return datetime.datetime.fromtimestamp(ts).strftime("%d %b %Y")
+
+    def _dim(self, text, size):
+        lb = QLabel(text); lb.setFont(QFont(C.F_MONO, size))
+        lb.setStyleSheet(f"color: {C.TEXT_DIM};"); return lb
+
+    def _section(self, text):
+        lb = QLabel(text); lb.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold))
+        lb.setStyleSheet(f"color: {C.TEXT_DIM}; letter-spacing: 2px; margin-top: 8px;")
+        return lb
+
+    @staticmethod
+    def _clear_lay(lay):
+        while lay.count():
+            it = lay.takeAt(0); w = it.widget()
+            if w is not None:
+                w.deleteLater()
+            elif it.layout() is not None:
+                CreatorsPage._clear_lay(it.layout())
+
+    def keyPressEvent(self, ev):
+        """Up/Down walk the shelf cards, matching the design's keyboard rule."""
+        rows = self._filtered()
+        if rows and ev.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+            keys = [self._key(c) for c in rows]
+            try:
+                i = keys.index(self._sel_key) if self._sel_key in keys else 0
+            except ValueError:
+                i = 0
+            i = max(0, min(len(keys) - 1, i + (1 if ev.key() == Qt.Key.Key_Down else -1)))
+            self._select_key(keys[i])
+            ev.accept(); return
+        super().keyPressEvent(ev)
+
+
+class AddMcpServerDialog(QDialog):
+    """The trust dialog behind wiring a new MCP server in by hand.
+
+    It mirrors the design's add-server flow - name, command, arguments and an
+    optional env block - but promises only what the engine really does: the
+    server is a separate process Saturn talks JSON-RPC to, its output is
+    treated as data rather than instructions, and every call is recorded. It
+    never claims an OS sandbox it does not have. Collecting is pure UI; the
+    page owns the actual ``hot_register`` call so this stays testable."""
+
+    def __init__(self, parent=None, existing=()):
+        super().__init__(parent)
+        self._existing = {str(n) for n in (existing or ())}
+        self.entry = None            # (name, config) once Trust & Add succeeds
+        self.setWindowTitle("Add MCP server")
+        self.setMinimumWidth(480)
+        self.setStyleSheet(
+            f"QDialog {{ background: {C.PANEL}; }}"
+            f" QLabel {{ background: transparent; border: none; color: {C.TEXT}; }}"
+            f" QLineEdit {{ background: {C.PANEL2}; border: 1px solid {C.BORDER};"
+            f" color: {C.TEXT}; padding: 6px 8px; }}"
+            f" QPlainTextEdit {{ background: {C.BG}; border: 1px solid {C.BORDER};"
+            f" color: {C.TEXT_MED}; }}")
+        root = QVBoxLayout(self); root.setSpacing(8)
+        root.setContentsMargins(16, 14, 16, 14)
+        ttl = QLabel("Connect a Model Context Protocol server")
+        ttl.setFont(QFont(C.F_BODY, 12, QFont.Weight.Bold))
+        ttl.setStyleSheet(f"color: {C.ACC};"); root.addWidget(ttl)
+        sub = QLabel("Saturn launches this as its own process and talks to it "
+                     "over MCP. Its results are data, never commands.")
+        sub.setWordWrap(True); sub.setFont(QFont(C.F_BODY, 9))
+        sub.setStyleSheet(f"color: {C.TEXT_DIM};"); root.addWidget(sub)
+
+        form = QGridLayout(); form.setHorizontalSpacing(10); form.setVerticalSpacing(8)
+        form.addWidget(self._fl("NAME"), 0, 0)
+        self._name = QLineEdit(); self._name.setPlaceholderText("weather")
+        form.addWidget(self._name, 0, 1)
+        form.addWidget(self._fl("COMMAND"), 1, 0)
+        self._cmd = QLineEdit(); self._cmd.setPlaceholderText("python")
+        form.addWidget(self._cmd, 1, 1)
+        form.addWidget(self._fl("ARGS"), 2, 0)
+        self._args = QLineEdit(); self._args.setPlaceholderText("C:/path/to/server.py")
+        form.addWidget(self._args, 2, 1)
+        form.addWidget(self._fl("ENV (JSON)"), 3, 0)
+        self._env = QPlainTextEdit(); self._env.setFixedHeight(58)
+        self._env.setPlaceholderText('{"API_KEY": "..."}   optional')
+        form.addWidget(self._env, 3, 1)
+        form.setColumnStretch(1, 1)
+        root.addLayout(form)
+
+        note = QFrame(); note.setStyleSheet(
+            f"QFrame {{ border: none; border-left: 3px solid {C.ACC2}; }}")
+        nl = QHBoxLayout(note); nl.setContentsMargins(10, 4, 4, 4)
+        nb = QLabel("A server you add here runs with your normal user rights. "
+                    "Only connect servers you trust - Saturn gates its own "
+                    "forged tools by approval, but a hand-added server is your "
+                    "responsibility.")
+        nb.setWordWrap(True); nb.setFont(QFont(C.F_BODY, 9))
+        nb.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+        nl.addWidget(nb); root.addWidget(note)
+
+        self._err = QLabel(""); self._err.setWordWrap(True)
+        self._err.setFont(QFont(C.F_MONO, 8)); self._err.setStyleSheet(f"color: {C.RED};")
+        root.addWidget(self._err)
+
+        btns = QHBoxLayout(); btns.addStretch(1)
+        cancel = _mem_btn("CANCEL")
+        cancel.clicked.connect(self.reject); btns.addWidget(cancel)
+        add = QPushButton("TRUST & ADD"); add.setCursor(Qt.CursorShape.PointingHandCursor)
+        add.setStyleSheet(S.primary(size=11)); add.clicked.connect(self._submit)
+        btns.addWidget(add)
+        root.addLayout(btns)
+
+    def _fl(self, text):
+        lb = QLabel(text); lb.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold))
+        lb.setStyleSheet(f"color: {C.ACC}; letter-spacing: 1px;")
+        lb.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return lb
+
+    def _submit(self):
+        name = self._name.text().strip()
+        command = self._cmd.text().strip()
+        if not name:
+            self._err.setText("Give the server a name."); return
+        if name in self._existing:
+            self._err.setText(f"A server called '{name}' is already configured.")
+            return
+        if not command:
+            self._err.setText("A launch command is required (e.g. python, npx).")
+            return
+        env = {}
+        raw = self._env.toPlainText().strip()
+        if raw:
+            try:
+                env = json.loads(raw)
+                if not isinstance(env, dict):
+                    raise ValueError("env must be a JSON object")
+            except Exception as exc:
+                self._err.setText("ENV is not a valid JSON object: " + str(exc)[:120])
+                return
+        cfg = {"command": command,
+               "args": [a for a in self._args.text().split() if a],
+               "disabled": False}
+        if env:
+            cfg["env"] = env
+        self.entry = (name, cfg)
+        self.accept()
+
+
+class CreatorToolsPage(QWidget):
+    """CREATOR TOOLS - Saturn's raw MCP wiring bench, ported from the design's
+    crpage. Where the CREATORS shelf shows what Saturn forged for itself, this
+    page is the user-facing control surface for every MCP server that is
+    configured: the developer workspace, a live grid of servers with connect /
+    disconnect / unregister / copy-config actions, and the add-server trust
+    dialog. A server Saturn forged itself points back to the Creators shelf so
+    the forge controls are never duplicated here. Nothing is faked: a server
+    with no live process shows zero tools, not a placeholder count."""
+
+    open_capability = pyqtSignal(str, str)    # name, tier -> jump to Creators
+
+    _STATUS = {"online": (C.GREEN, "\u25cf ONLINE"),
+               "asleep": (C.ACC2, "\u25c7 ASLEEP"),
+               "offline": (C.TEXT_DIM, "\u25cb OFFLINE"),
+               "disabled": (C.RED, "\u25b2 DISABLED")}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(
+            f"CreatorToolsPage {{ background: {C.PANEL}; border: none; }}"
+            f" CreatorToolsPage QLabel {{ background: transparent; border: none; }}"
+            f" CreatorToolsPage QScrollArea {{ border: none; background: transparent; }}"
+            f" CreatorToolsPage QScrollArea > QWidget > QWidget {{ background: transparent; }}")
+        self._rows: list = []
+
+        root = QVBoxLayout(self); root.setContentsMargins(20, 16, 20, 12)
+        root.setSpacing(10)
+        root.addLayout(self._build_header())
+        self._ws_card_host = QVBoxLayout(); self._ws_card_host.setSpacing(6)
+        ws_wrap = QWidget(); ws_wrap.setLayout(self._ws_card_host)
+        ws_wrap.setStyleSheet("background: transparent;")
+        root.addWidget(ws_wrap)
+        root.addLayout(self._build_toolbar())
+
+        self._grid_scroll = QScrollArea(); self._grid_scroll.setWidgetResizable(True)
+        self._grid_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._grid_inner = QWidget(); self._grid_inner.setStyleSheet("background: transparent;")
+        self._grid_lay = QGridLayout(self._grid_inner)
+        self._grid_lay.setContentsMargins(2, 2, 2, 2); self._grid_lay.setSpacing(12)
+        self._grid_scroll.setWidget(self._grid_inner)
+        root.addWidget(self._grid_scroll, 1)
+
+        self._status = QLabel()
+        self._status.setFont(QFont(C.F_MONO, 8))
+        self._status.setStyleSheet(f"color: {C.TEXT_DIM}; min-height: 16px;"
+                                   f" border-top: 1px solid {C.BORDER}; padding-top: 4px;")
+        root.addWidget(self._status)
+        self.refresh()
+
+    # ── header ──────────────────────────────────────────────────────────────
+    def _build_header(self):
+        lay = QVBoxLayout(); lay.setSpacing(3)
+        top = QHBoxLayout()
+        top.addWidget(_ChromaTitle("CREATOR TOOLS", 15))
+        top.addStretch(1)
+        self._hdr_counts = QLabel(); self._hdr_counts.setFont(QFont(C.F_MONO, 9))
+        self._hdr_counts.setTextFormat(Qt.TextFormat.RichText)
+        top.addWidget(self._hdr_counts)
+        lay.addLayout(top)
+        self._story = QLabel(); self._story.setFont(QFont(C.F_BODY, 9))
+        self._story.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(self._story)
+        return lay
+
+    def _build_toolbar(self):
+        lay = QHBoxLayout(); lay.setSpacing(8)
+        add = QPushButton("+ ADD MCP SERVER"); add.setCursor(Qt.CursorShape.PointingHandCursor)
+        add.setStyleSheet(S.primary(size=11)); add.clicked.connect(self._add_server)
+        lay.addWidget(add)
+        rf = _mem_btn("RE-SCAN"); rf.clicked.connect(self._rescan)
+        lay.addWidget(rf)
+        lay.addStretch(1)
+        dv = _mem_btn("DEVELOPER MODE", ink=C.ACC2)
+        dv.clicked.connect(self._open_dev_mode)
+        lay.addWidget(dv)
+        return lay
+
+    # ── data ────────────────────────────────────────────────────────────────
+    def _rescan(self):
+        self.refresh(); self._status.setText("Re-scanned the MCP server config.")
+
+    def refresh(self):
+        self._rows = self._collect()
+        self._render_workspace()
+        self._render_header()
+        self._render_grid()
+
+    @staticmethod
+    def _collect():
+        """Every configured MCP server, read straight from the truth: the user
+        and workspace config files, the forge's own manifest list (so a forged
+        server is recognised and pointed at Creators), and the live manager for
+        connection state. Read-only - it never boots a process."""
+        configs: dict = {}
+        try:
+            from core.creators_catalog import CreatorsCatalog
+            paths = CreatorsCatalog._config_paths()
+        except Exception:
+            paths = []
+        for p in paths:
+            try:
+                if Path(p).exists():
+                    data = json.loads(Path(p).read_text(encoding="utf-8"))
+                    configs.update(data.get("mcpServers", {}) or {})
+            except Exception:
+                continue
+        forged = set()
+        try:
+            from core.mcp_forge import MCPForge
+            forged = {m.get("name") for m in (MCPForge.list_forged() or []) if m.get("name")}
+        except Exception:
+            pass
+        live = {}
+        try:
+            from core.creators_catalog import CreatorsCatalog
+            live = CreatorsCatalog._live_servers()
+        except Exception:
+            live = {}
+        rows = []
+        for name, cfg in configs.items():
+            cfg = cfg or {}
+            server = live.get(name)
+            connected = bool(server and getattr(server, "is_connected", False))
+            lazy = bool(getattr(server, "lazy", True)) if server else True
+            tool_count = len(getattr(server, "tools", []) or []) if server else 0
+            if cfg.get("disabled"):
+                state = "disabled"
+            elif connected:
+                state = "online"
+            elif server is not None and lazy:
+                state = "asleep"
+            else:
+                state = "offline"
+            command = str(cfg.get("command", ""))
+            args = cfg.get("args") or []
+            rows.append({
+                "name": name, "config": dict(cfg), "forged": name in forged,
+                "command": command, "args": list(args),
+                "transport": "stdio" if command else ("http" if cfg.get("url") else "unknown"),
+                "state": state, "connected": connected, "tool_count": tool_count,
+                "description": str(cfg.get("description", "")),
+            })
+        rows.sort(key=lambda r: (r["forged"], r["state"] != "online", r["name"].lower()))
+        return rows
+
+    def _render_header(self):
+        n = len(self._rows)
+        online = sum(1 for r in self._rows if r["state"] == "online")
+        forged = sum(1 for r in self._rows if r["forged"])
+        self._hdr_counts.setText(
+            f'<span style="color:{C.GREEN}">{online} online</span>'
+            f'<span style="color:{C.TEXT_DIM}"> \u00b7 </span>'
+            f'<span style="color:{C.ACC}">{n} servers</span>'
+            f'<span style="color:{C.TEXT_DIM}"> \u00b7 </span>'
+            f'<span style="color:{C.FEATURE}">{forged} forged</span>')
+        self._story.setText(
+            "MCP servers Saturn talks to. Connect your own, or let the "
+            "Creators shelf forge one for you.")
+
+    # ── workspace card ────────────────────────────────────────────────────────
+    def _render_workspace(self):
+        self._clear_lay(self._ws_card_host)
+        try:
+            from memory.config_manager import get_setting
+            workspace = str(get_setting("developer_mode_workspace", "") or "")
+            enabled = bool(get_setting("developer_mode_enabled", False))
+        except Exception:
+            workspace, enabled = "", False
+        card = QFrame(); card.setStyleSheet(
+            f"QFrame {{ border: 1px solid {C.ACC}; background: {C.PANEL2}; }}"
+            f" QFrame QLabel {{ background: transparent; }}")
+        v = QVBoxLayout(card); v.setContentsMargins(12, 8, 12, 8); v.setSpacing(6)
+        eyebrow = QLabel("DEVELOPER WORKSPACE"); eyebrow.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold))
+        eyebrow.setStyleSheet(f"color: {C.TEXT_DIM}; letter-spacing: 2px;")
+        v.addWidget(eyebrow)
+        enabled_box = QCheckBox("Developer mode on")
+        enabled_box.setChecked(enabled); enabled_box.setFont(QFont(C.F_BODY, 9))
+        enabled_box.setStyleSheet(f"QCheckBox {{ color: {C.TEXT_MED}; background: transparent; }}")
+        row = QHBoxLayout(); row.setSpacing(8)
+        path = QLineEdit(workspace); path.setReadOnly(True); path.setFont(QFont(C.F_MONO, 9))
+        path.setStyleSheet(f"QLineEdit {{ background: {C.BG}; border: 1px solid {C.BORDER};"
+                           f" color: {C.TEXT_MED}; padding: 3px 8px; }}")
+        row.addWidget(path, 1)
+        browse = _mem_btn("BROWSE")
+        browse.clicked.connect(lambda: self._browse_workspace(path))
+        row.addWidget(browse)
+        save = _mem_btn("SAVE", ink=C.GREEN, edge=C.GREEN)
+        save.clicked.connect(lambda _=False, e=enabled_box, p=path: self._save_workspace(e, p))
+        row.addWidget(save)
+        v.addLayout(row)
+        opt = QHBoxLayout(); opt.setSpacing(8)
+        opt.addWidget(enabled_box)
+        hint = QLabel(workspace or "No workspace folder selected yet.")
+        hint.setFont(QFont(C.F_MONO, 8)); hint.setStyleSheet(f"color: {C.TEXT_DIM};")
+        hint.setWordWrap(True); opt.addWidget(hint, 1)
+        v.addLayout(opt)
+        self._ws_card_host.addWidget(card)
+
+    def _browse_workspace(self, path_edit):
+        try:
+            start = path_edit.text().strip() or str(BASE_DIR)
+            picked = QFileDialog.getExistingDirectory(self, "Select workspace folder", start)
+            if picked:
+                path_edit.setText(picked)
+        except Exception as exc:
+            self._status.setText("Could not open the folder picker: " + str(exc)[:120])
+
+    def _save_workspace(self, enabled_box, path_edit):
+        try:
+            from memory.config_manager import set_setting
+            set_setting("developer_mode_workspace", path_edit.text().strip())
+            set_setting("developer_mode_enabled", bool(enabled_box.isChecked()))
+            self._status.setText("Workspace saved.")
+        except Exception as exc:
+            self._status.setText("Could not save workspace: " + str(exc)[:120])
+        self._render_workspace()
+
+    # ── grid ─────────────────────────────────────────────────────────────────
+    def _render_grid(self):
+        self._clear_grid()
+        if not self._rows:
+            box = self._empty_state()
+            self._grid_lay.addWidget(box, 0, 0, 1, 3)
+            self._grid_lay.setRowStretch(1, 1)
+            return
+        cols = 3
+        for i, row in enumerate(self._rows):
+            self._grid_lay.addWidget(self._server_card(row), i // cols, i % cols)
+        for c in range(cols):
+            self._grid_lay.setColumnStretch(c, 1)
+        last = (len(self._rows) - 1) // cols
+        self._grid_lay.setRowStretch(last + 1, 1)
+
+    def _clear_grid(self):
+        CreatorsPage._clear_lay(self._grid_lay)
+
+    def _server_card(self, row):
+        card = QFrame(); card.setStyleSheet(
+            f"QFrame {{ border: 1px solid {C.BORDER}; background: {C.PANEL2}; }}"
+            f" QFrame QLabel {{ background: transparent; }}")
+        card.setMinimumHeight(150)
+        v = QVBoxLayout(card); v.setContentsMargins(12, 10, 12, 10); v.setSpacing(5)
+        top = QHBoxLayout()
+        top.addWidget(_Sigil(row["name"], "mcp", 30))
+        nm = QLabel(row["name"]); nm.setFont(QFont(C.F_BODY, 11, QFont.Weight.Bold))
+        nm.setStyleSheet(f"color: {C.TEXT};")
+        top.addWidget(nm, 1)
+        col, text = self._STATUS.get(row["state"], self._STATUS["offline"])
+        st = QLabel(text); st.setFont(QFont(C.F_MONO, 8, QFont.Weight.Bold))
+        st.setStyleSheet(f"color: {col};"); top.addWidget(st)
+        v.addLayout(top)
+        chips = QHBoxLayout(); chips.setSpacing(6)
+        chips.addWidget(_chip_label(row["transport"].upper(), C.ACC))
+        if row["forged"]:
+            chips.addWidget(_chip_label("FORGED", C.ACC2))
+        chips.addStretch(1)
+        tc = QLabel(f"{row['tool_count']} tools"); tc.setFont(QFont(C.F_MONO, 8))
+        tc.setStyleSheet(f"color: {C.TEXT_DIM};"); chips.addWidget(tc)
+        v.addLayout(chips)
+        line = row["command"] + ((" " + " ".join(row["args"])) if row["args"] else "")
+        cmd = QLabel(line or "(no command)"); cmd.setFont(QFont(C.F_MONO, 8))
+        cmd.setStyleSheet(f"color: {C.TEXT_DIM};")
+        cmd.setWordWrap(True); cmd.setMaximumHeight(30)
+        cmd.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        v.addWidget(cmd)
+        v.addStretch(1)
+        v.addLayout(self._card_actions(row))
+        return card
+
+    def _card_actions(self, row):
+        r = QHBoxLayout(); r.setSpacing(6)
+        name = row["name"]
+        if row["forged"]:
+            op = _mem_btn("OPEN IN CREATORS", ink=C.ACC)
+            op.clicked.connect(lambda _=False, n=name: self.open_capability.emit(n, "mcp"))
+            r.addWidget(op)
+        else:
+            if row["connected"]:
+                btn = _mem_btn("DISCONNECT")
+                btn.clicked.connect(lambda _=False, n=name: self._disconnect(n))
+            else:
+                btn = _mem_btn("CONNECT", ink=C.GREEN, edge=C.GREEN)
+                btn.clicked.connect(lambda _=False, cfg=dict(row["config"]), n=name: self._connect(n, cfg))
+            r.addWidget(btn)
+            cp = _mem_btn("COPY"); cp.clicked.connect(lambda _=False, x=row: self._copy(x))
+            r.addWidget(cp)
+            un = _mem_btn("REMOVE", ink=C.RED, edge=C.RED)
+            un.clicked.connect(lambda _=False, n=name: self._unregister(n))
+            r.addWidget(un)
+        r.addStretch(1)
+        return r
+
+    # ── engine actions ─────────────────────────────────────────────────────────
+    def _connect(self, name, cfg):
+        try:
+            from core.mcp_manager import UniversalMCPManager
+            ok, msg = UniversalMCPManager.get_instance().hot_register(name, cfg, persist=True)
+            self._status.setText(("Connected " if ok else "Could not connect: ") + str(msg)[:200])
+        except Exception as exc:
+            self._status.setText("Connect failed: " + str(exc)[:200])
+        self.refresh()
+
+    def _disconnect(self, name):
+        try:
+            from core.mcp_manager import UniversalMCPManager
+            ok, msg = UniversalMCPManager.get_instance().hot_unregister(name, remove_from_config=False)
+            self._status.setText(("Stopped " if ok else "Could not stop: ") + str(msg)[:200])
+        except Exception as exc:
+            self._status.setText("Disconnect failed: " + str(exc)[:200])
+        self.refresh()
+
+    def _unregister(self, name):
+        # Removing deletes the entry from the user's config, so confirm with a
+        # modal - the async HUD banner is for call-time approvals, not this.
+        try:
+            ret = QMessageBox.question(
+                self, "Remove MCP server",
+                f"Stop '{name}' and delete it from your mcp_servers.json?\n"
+                "You can add it again later.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if ret != QMessageBox.StandardButton.Yes:
+                self._status.setText(f"Kept '{name}'.")
+                return
+        except Exception:
+            pass
+        try:
+            from core.mcp_manager import UniversalMCPManager
+            ok, msg = UniversalMCPManager.get_instance().hot_unregister(name, remove_from_config=True)
+            self._status.setText(("Removed " if ok else "Could not remove: ") + str(msg)[:200])
+        except Exception as exc:
+            self._status.setText("Remove failed: " + str(exc)[:200])
+        self.refresh()
+
+    def _copy(self, row):
+        cfg = {row["name"]: row["config"]}
+        try:
+            QApplication.clipboard().setText(json.dumps(cfg, indent=2))
+            self._status.setText(f"Copied '{row['name']}' config to the clipboard.")
+        except Exception as exc:
+            self._status.setText("Copy failed: " + str(exc)[:160])
+
+    def _add_server(self):
+        dlg = AddMcpServerDialog(self, existing={r["name"] for r in self._rows})
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.entry:
+            return
+        name, cfg = dlg.entry
+        try:
+            from core.mcp_manager import UniversalMCPManager
+            ok, msg = UniversalMCPManager.get_instance().hot_register(name, cfg, persist=True)
+            self._status.setText(("Added " if ok else "Added but did not boot: ") + str(msg)[:220])
+        except Exception as exc:
+            self._status.setText("Add failed: " + str(exc)[:200])
+        self.refresh()
+
+    def _open_dev_mode(self):
+        try:
+            dlg = DeveloperModeDialog(parent=self)
+            dlg.exec()
+        except Exception:
+            pass
+        self._render_workspace()
+
+    # ── empty state + helpers ──────────────────────────────────────────────────
+    def _empty_state(self):
+        box = QFrame(); box.setStyleSheet(f"QFrame {{ border: 1px dashed {C.BORDER}; }}")
+        v = QVBoxLayout(box); v.setContentsMargins(20, 24, 20, 24); v.setSpacing(8)
+        v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t = QLabel("NO MCP SERVERS CONFIGURED"); t.setFont(QFont(C.F_DISPLAY, 13, QFont.Weight.Bold))
+        t.setStyleSheet(f"color: {C.TEXT};"); v.addWidget(t, 0, Qt.AlignmentFlag.AlignCenter)
+        line = QLabel("Add one with a launch command, or ask Saturn on the "
+                      "Creators shelf to forge a server for you.")
+        line.setWordWrap(True); line.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        line.setFont(QFont(C.F_BODY, 10)); line.setStyleSheet(f"color: {C.TEXT_MED};")
+        v.addWidget(line)
+        return box
+
+    @staticmethod
+    def _clear_lay(lay):
+        while lay.count():
+            it = lay.takeAt(0); w = it.widget()
+            if w is not None:
+                w.deleteLater()
+            elif it.layout() is not None:
+                CreatorToolsPage._clear_lay(it.layout())
+
+
 class TasksPage(QWidget):
     """The TASKS workspace ported from saturn_command.html's #taskpage.
 
@@ -4444,6 +6023,10 @@ class TasksPage(QWidget):
     running task fills its bars, advances its steps, asks for approval and
     finishes; the briefing's "N tasks need you" reads back through
     needs_you_count()."""
+
+    # Emitted when the user clicks "Open in Creators" on a successfully forged
+    # task: (capability name, tier). MainWindow routes it to the Creators shelf.
+    open_creators = pyqtSignal(str, str)
 
     _TST = {"running": ("RUNNING", "w"), "waiting": ("NEEDS YOU", "w"),
             "done": ("DONE", "ok"), "failed": ("FAILED", "e"),
@@ -4650,6 +6233,50 @@ class TasksPage(QWidget):
     def needs_you_count(self) -> int:
         return sum(1 for t in self._tasks if t["status"] in ("waiting", "failed"))
 
+    def mark_forge_result(self, capability: str, tier: str, goal: str = "",
+                          task_id: int | None = None) -> int:
+        """Stamp a task as a *successful* forge so its workspace shows the tier
+        chip (FEATURE cyan / MCP SERVER magenta) and an "Open in Creators" button.
+        Called by the controller the moment SkillForge/MCPForge lands a capability.
+
+        If ``task_id`` names an existing running task (the forge the user kicked
+        off), it is finished in place; otherwise a fresh done task is seeded so the
+        chip always has a home even when the forge never opened a task workspace.
+        Returns the task id that now carries the chip."""
+        tier = "mcp" if str(tier or "").lower() in ("mcp", "portable", "mcp server") else "feature"
+        t = self._by(task_id) if task_id is not None else None
+        if t is None:
+            # Reuse an in-flight forge task by title when we were not handed an id.
+            needle = (capability or goal or "").lower()
+            t = next((x for x in self._tasks
+                      if x["status"] in ("running", "queued")
+                      and (needle and needle in x["title"].lower()
+                           or str(x.get("forge_capability") or "").lower() == str(capability).lower())),
+                     None)
+        if t is None:
+            self._tid += 1
+            t = self._mk(self._tid, f"Forge the {capability} capability",
+                         [{"n": "Plan the capability", "res": ["Architecture chosen"]},
+                          {"n": "Write the source", "res": ["Saturn wrote the code"]},
+                          {"n": "Verify in the sandbox", "res": ["Sandbox tests passed"]},
+                          {"n": "Register it", "res": [f"Live as {capability}"]}],
+                         status="done", cur=4, el=0)
+            for s in t["steps"]:
+                s["st"] = "done"; s["pr"] = 100
+            self._tasks.append(t)
+        t["status"] = "done"
+        for s in t["steps"]:
+            s["st"] = "done"; s["pr"] = 100
+        t["cur"] = len(t["steps"])
+        t["forge_tier"] = tier
+        t["forge_capability"] = capability
+        t["arts"] = list(t.get("arts") or []) + [
+            {"n": capability, "k": "CAPABILITY", "z": "MCP SERVER" if tier == "mcp" else "FEATURE"}]
+        self._tlog(t, f"Forged {capability} ({tier}) and registered it.")
+        self._sel = t["id"]
+        self._render()
+        return t["id"]
+
     # -- render -----------------------------------------------------------
     def _tone(self, key):
         return {"ok": C.GREEN, "w": C.ACC2, "e": C.RED, "": C.TEXT_DIM}[key]
@@ -4745,7 +6372,27 @@ class TasksPage(QWidget):
         title.setFont(QFont(C.F_BODY, 14, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {C.TEXT};")
         title.setWordWrap(True)
-        col.addWidget(title)
+        # Design §1: a forge task earns a tier chip next to its title, but only
+        # once it *succeeds* - a running or failed forge registered nothing, so the
+        # chip stays hidden. MCP SERVER is magenta, FEATURE the new feature cyan.
+        ftier = t.get("forge_tier")
+        if ftier and t["status"] == "done":
+            trow = QHBoxLayout()
+            trow.setSpacing(8)
+            trow.addWidget(title)
+            chip = _chip_label("MCP SERVER" if ftier == "mcp" else "FEATURE",
+                               C.ACC if ftier == "mcp" else C.FEATURE)
+            chip.setFont(QFont(C.F_MONO, 10, QFont.Weight.Bold))
+            trow.addWidget(chip)
+            if t.get("forge_capability"):
+                ob = _mem_btn("OPEN IN CREATORS", ink=C.ACC2, edge=C.ACC2)
+                ob.clicked.connect(lambda cap=t["forge_capability"], tr=ftier:
+                                   self.open_creators.emit(cap, tr))
+                trow.addWidget(ob)
+            trow.addStretch(1)
+            col.addLayout(trow)
+        else:
+            col.addWidget(title)
         meta = QHBoxLayout()
         meta.setSpacing(8)
         meta.addWidget(_chip_label(lab, self._tone(tone)))
@@ -5511,6 +7158,7 @@ _IC_PATHS = {
     "memory": "M5 6c0-1.7 3-3 7-3s7 1.3 7 3-3 3-7 3-7-1.3-7-3zM5 6v12c0 1.7 3 3 7 3s7-1.3 7-3V6",
     "obs":    "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 100 6 3 3 0 000-6z",
     "files":  "M6 3h8l4 4v14H6zM14 3v4h4",
+    "cre":    "M11 3l1.6 4.4L17 9l-4.4 1.6L11 15l-1.6-4.4L5 9l4.4-1.6zM17 14l.8 2.2L20 17l-2.2.8L17 20l-.8-2.2L14 17l2.2-.8z",
     "tools":  "M4 20l9-9M14 4l6 6-3 3-6-6z",
     "set":    "M12 9a3 3 0 100 6 3 3 0 000-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2",
     "und":    "M12 3a6 6 0 00-3 11v3h6v-3a6 6 0 00-3-11zM9 21h6",
@@ -15100,11 +16748,22 @@ class _NavRow(QPushButton):
     def __init__(self, kind: str, text: str, parent=None):
         super().__init__(text, parent)
         self._kind = kind
+        self._badge = ""          # right-aligned count pill (empty hides it)
+        self._badge_live = False  # amber "forging" state vs the neutral count
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(44)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet("background: transparent; border: none;")
+
+    def set_badge(self, text: str, live: bool = False) -> None:
+        """Show a small count pill at the row's right edge (the Creators row's
+        capability count, or the word ``forging`` in amber while one runs)."""
+        if text == self._badge and live == self._badge_live:
+            return
+        self._badge = text
+        self._badge_live = live
+        self.update()
 
     def _text_color(self, on: bool) -> str:
         if on or self.underMouse():
@@ -15129,12 +16788,32 @@ class _NavRow(QPushButton):
         pm = _svg_icon(self._kind, self._ICON, C.ACC if on else C.TEXT_DIM)
         p.drawPixmap(self._LEFT, (self.height() - pm.height()) // 2, pm)
         # label, offset by icon width + the mockup's 12px gap
+        tx = self._LEFT + self._ICON + self._GAP
+        # Reserve the badge's width so a long label never runs under it.
+        right_pad = 8
+        if self._badge:
+            bf = QFont(C.F_MONO)
+            bf.setPixelSize(10)
+            bf.setBold(True)
+            bb = QFontMetrics(bf).horizontalAdvance(self._badge)
+            pill_w = bb + 14
+            pill_h = 18
+            pill_x = self.width() - pill_w - 10
+            pill_y = (self.height() - pill_h) // 2
+            col = C.ACC2 if self._badge_live else (C.ACC if on else C.TEXT_DIM)
+            p.setPen(QPen(_qcol(col), 1))
+            p.setBrush(_qcol(C.PANEL if not on else C.HI))
+            p.drawRoundedRect(pill_x, pill_y, pill_w, pill_h, 3, 3)
+            p.setPen(_qcol(col))
+            p.setFont(bf)
+            p.drawText(QRect(pill_x, pill_y, pill_w, pill_h),
+                       int(Qt.AlignmentFlag.AlignCenter), self._badge)
+            right_pad = pill_w + 18
         p.setPen(_qcol(self._text_color(on)))
         f = QFont(C.F_BODY)
         f.setPixelSize(14)
         p.setFont(f)
-        tx = self._LEFT + self._ICON + self._GAP
-        p.drawText(QRect(tx, 0, self.width() - tx - 8, self.height()),
+        p.drawText(QRect(tx, 0, self.width() - tx - right_pad, self.height()),
                    int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
                    self.text())
         p.end()
@@ -15167,7 +16846,8 @@ class CommandNavSidebar(QFrame):
     NAV = [
         ("chat", "Chat"), ("tasks", "Tasks"), ("brief", "Briefing"),
         ("memory", "Memory"), ("obs", "Observations"), ("files", "Files"),
-        ("dev", "Devices"), ("tools", "Creator Tools"), ("set", "Settings"),
+        ("dev", "Devices"), ("cre", "Creators"), ("tools", "Creator Tools"),
+        ("set", "Settings"),
     ]
 
     def __init__(self, parent=None):
@@ -16580,6 +18260,12 @@ class MainWindow(QMainWindow):
     _attention_sig = pyqtSignal(object)
     _meeting_sig = pyqtSignal(object)
     _task_workspace_sig = pyqtSignal(object)
+    # Thread-safe channel the engine uses to announce a *successful* forge so the
+    # Tasks workspace grows its tier chip and the Creators shelf re-reads itself.
+    _forge_result_sig = pyqtSignal(str, str, str)
+    # Cross-thread "a forge attempt ended (success or fail) - clear the shelf"
+    # channel, so the 'forging' badge never sticks when a forge lands off-thread.
+    _creators_finish_sig = pyqtSignal()
     _screen_capture_sig = pyqtSignal()
     discord_config_changed = pyqtSignal(object)
     discord_status_changed = pyqtSignal(str)
@@ -16717,6 +18403,8 @@ class MainWindow(QMainWindow):
         self.on_attention_action = None
         self.on_chat_event = None
         self.on_remote_clicked = None
+        self.on_forge_request = None    # set by the controller: goal -> forge
+        self.on_reforge_request = None  # set by the controller: (name, tier)
         self._muted           = False
         self._wakeword_listening = False
         self._muted_ui_exempt = False
@@ -16862,6 +18550,8 @@ class MainWindow(QMainWindow):
             (self._attention_sig, self._show_attention_alert),
             (self._meeting_sig, self._apply_meeting_state),
             (self._task_workspace_sig, self._apply_task_workspace),
+            (self._forge_result_sig, self._apply_forge_result),
+            (self._creators_finish_sig, self.creators_forge_finished),
             (self._scan_sig, self._apply_scan_state),
             (self._screen_capture_sig, self._on_screen_capture_requested),
             (self.discord_status_changed, self._on_discord_status_update),
@@ -17528,8 +19218,23 @@ class MainWindow(QMainWindow):
             self._browse_attachment()
         elif key == "dev":
             self._on_nav_devices()
+        elif key == "cre":
+            # The CREATORS shelf: Saturn's self-forged capability surface. Show
+            # it, re-read the catalog so the shelf is never stale, and mirror the
+            # live total onto the rail badge when nothing is mid-forge.
+            if hasattr(self, "_center_stack"):
+                self._center_stack.setCurrentIndex(_PAGE_CREATORS)
+            if hasattr(self, "_creators_page"):
+                self._creators_page.refresh()
+            self._set_creators_badge()
         elif key == "tools":
-            self._open_creator_tools()
+            # CREATOR TOOLS: the MCP wiring bench - the developer workspace and
+            # every configured server. Re-scan the config so the grid reflects
+            # adds, removals and connect/disconnect since the last visit.
+            if hasattr(self, "_center_stack"):
+                self._center_stack.setCurrentIndex(_PAGE_TOOLS)
+            if hasattr(self, "_creator_tools_page"):
+                self._creator_tools_page.refresh()
         elif key == "set":
             self._on_nav_settings()
         self._update_nav_styles()
@@ -17540,6 +19245,76 @@ class MainWindow(QMainWindow):
             dlg.exec()
         except Exception:
             pass
+
+    # ── Creators shelf wiring ────────────────────────────────────────────────
+    def _creators_nav_row(self):
+        try:
+            return self._nav_rail.rows.get("cre")
+        except Exception:
+            return None
+
+    def _set_creators_badge(self) -> None:
+        """Mirror the live capability total on the rail row, unless a forge is
+        mid-flight (then the 'forging' badge already owns the row - leave it)."""
+        row = self._creators_nav_row()
+        if row is None or not hasattr(self, "_creators_page"):
+            return
+        if getattr(self._creators_page, "_forging", False):
+            return
+        try:
+            n = len(self._creators_page._all)
+            row.set_badge(str(n) if n else "", live=False)
+        except Exception:
+            pass
+
+    def _on_creators_forge(self, goal: str) -> None:
+        """A goal typed into the Creators forge box. Light the rail badge, start
+        the shelf's stage strip, then drive it through the controller's forge
+        pipeline - the same path a spoken 'make me a feature' command takes."""
+        row = self._creators_nav_row()
+        if row is not None:
+            row.set_badge("forging", live=True)
+        if hasattr(self, "_creators_page"):
+            self._creators_page.begin_forging()
+        cb = getattr(self, "on_forge_request", None)
+        if cb:
+            threading.Thread(target=cb, args=(goal,),
+                             daemon=True, name="creators-forge").start()
+        else:
+            self.submit_command(goal)
+
+    def _on_creators_reforge(self, name: str, tier: str) -> None:
+        """Re-forge a capability from its original goal, through the controller
+        when it is wired, else as a plain command fallback."""
+        row = self._creators_nav_row()
+        if row is not None:
+            row.set_badge("forging", live=True)
+        cb = getattr(self, "on_reforge_request", None)
+        if cb:
+            threading.Thread(target=cb, args=(name, tier),
+                             daemon=True, name="creators-reforge").start()
+        else:
+            self.submit_command(f"forge a {tier} capability: {name}")
+
+    def creators_forge_finished(self) -> None:
+        """Called by the controller when a forge (or auto-heal re-forge) lands:
+        drop the 'forging' badge, end the shelf strip and re-read the catalog."""
+        row = self._creators_nav_row()
+        if row is not None:
+            row.set_badge("", live=False)
+        if hasattr(self, "_creators_page"):
+            self._creators_page.end_forging()
+        self._set_creators_badge()
+
+    def _open_capability_in_creators(self, name: str, tier: str) -> None:
+        """Jump from a forged Tasks workspace to the Creators shelf, landing on
+        that exact capability's detail."""
+        if not hasattr(self, "_center_stack"):
+            return
+        self._center_stack.setCurrentIndex(_PAGE_CREATORS)
+        if hasattr(self, "_creators_page"):
+            self._creators_page.select_capability(name, tier)
+        self._set_creators_badge()
 
     def _reposition_orb(self) -> None:
         """Constrain the orb web view to the centre stage in central coords,
@@ -17587,7 +19362,8 @@ class MainWindow(QMainWindow):
             # Memory, Tasks and Briefing are full-width centre pages (the
             # mockup's body.mv/.tv/.bv hide the .rt rail); every other index
             # restores it under the user's collapse choice.
-            detail.setVisible(index not in (_PAGE_MEMORY, _PAGE_TASKS, _PAGE_BRIEF)
+            detail.setVisible(index not in (_PAGE_MEMORY, _PAGE_TASKS, _PAGE_BRIEF,
+                                             _PAGE_CREATORS)
                               and not getattr(self, "_detail_collapsed", False))
         QTimer.singleShot(0, self._reposition_orb)
 
@@ -17686,7 +19462,8 @@ class MainWindow(QMainWindow):
             return
         cur = self._center_stack.currentIndex() if hasattr(self, "_center_stack") else 0
         key_by_page = {2: "dev", 4: "set", _PAGE_VISION: "obs", _PAGE_MEMORY: "memory",
-                       _PAGE_TASKS: "tasks", _PAGE_BRIEF: "brief"}
+                       _PAGE_TASKS: "tasks", _PAGE_BRIEF: "brief",
+                       _PAGE_CREATORS: "cre", _PAGE_TOOLS: "tools"}
         # Home (the command centre, index 0) keeps the Chat row lit the way the
         # mockup opens with the first row active. The retired right-hand chat
         # slide-in no longer drives the highlight, so this is purely page-based.
@@ -18965,6 +20742,20 @@ class MainWindow(QMainWindow):
         elif action == "clear":
             target.clear_workspace()
 
+    def _apply_forge_result(self, capability: str, tier: str, goal: str) -> None:
+        """Runs on the GUI thread off _forge_result_sig. Land the tier chip on the
+        Tasks workspace and drop the Creators 'forging' badge so the freshly forged
+        capability shows up on the shelf."""
+        if hasattr(self, "_tasks_page"):
+            try:
+                self._tasks_page.mark_forge_result(capability, tier, goal)
+            except Exception:
+                pass
+        try:
+            self.creators_forge_finished()
+        except Exception:
+            pass
+
     def _on_discord_status_update(self, message: str):
         if not message:
             return
@@ -19389,6 +21180,25 @@ class MainWindow(QMainWindow):
             lambda: self._center_stack.setCurrentIndex(_PAGE_TASKS))
         self._center_stack.addWidget(self._brief_page)
         self._center_stack.addWidget(self._tasks_page)
+
+        # Creators (index 9) is Saturn's self-forged capability shelf. Its forge
+        # box routes through the controller's forge pipeline so a typed goal
+        # forges exactly like a spoken one, and the rail badge reflects the live
+        # capability count / in-flight forge.
+        self._creators_page = CreatorsPage()
+        self._creators_page.forge_requested.connect(self._on_creators_forge)
+        self._creators_page.reforge_requested.connect(self._on_creators_reforge)
+        self._creators_page.open_tasks.connect(
+            lambda: self._center_stack.setCurrentIndex(_PAGE_TASKS))
+        self._tasks_page.open_creators.connect(self._open_capability_in_creators)
+        self._center_stack.addWidget(self._creators_page)
+
+        # Creator Tools (index 10, the design's crpage) is the MCP wiring bench:
+        # the developer workspace plus every configured server. A forged server
+        # hands off to the Creators shelf so the forge controls stay in one home.
+        self._creator_tools_page = CreatorToolsPage()
+        self._creator_tools_page.open_capability.connect(self._open_capability_in_creators)
+        self._center_stack.addWidget(self._creator_tools_page)
         
         self._center_stack.setCurrentIndex(0)
         # The nav pill paints from the stack, not from the buttons, so a page
@@ -28071,6 +29881,23 @@ class SaturnUI:
 
     def clear_task_workspace(self):
         self._win._task_workspace_sig.emit({"action": "clear"})
+
+    def note_forge_result(self, capability: str, tier: str, goal: str = ""):
+        """Thread-safe: announce a landed forge so Tasks shows its tier chip and
+        the Creators shelf refreshes. May be called from the forge worker thread."""
+        try:
+            self._win._forge_result_sig.emit(str(capability or ""), str(tier or ""),
+                                             str(goal or ""))
+        except Exception:
+            pass
+
+    def creators_forge_finished(self):
+        """Thread-safe: clear the Creators 'forging' badge after a forge attempt
+        ends (success or failure). Marshals to the GUI via a queued signal."""
+        try:
+            self._win._creators_finish_sig.emit()
+        except Exception:
+            pass
 
     def show_hud_operation(self, title: str, step: str, sources: list = None, tool: str = None, **kwargs):
         """Displays live operation telemetry on the right HUD wing."""

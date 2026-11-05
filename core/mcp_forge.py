@@ -30,10 +30,12 @@ work unchanged for either tier.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -89,6 +91,50 @@ def classify_tier(goal: str, name_hint: str = "", context_hints: str = "") -> st
     if name_hint.lower().endswith(("_server", "_mcp")):
         return "portable"
     return "lightweight"
+
+
+def _scan_needs(src: str) -> List[str]:
+    needs: List[str] = []
+    if re.search(r"\bsubprocess\b|\bos\.system\b|\bos\.popen\b|\bpty\b", src):
+        needs.append("commands")
+    if re.search(r"\brequests\b|\burllib\b|\bhttpx\b|\baiohttp\b|\bsocket\b|\burlopen\b", src):
+        needs.append("network")
+    if re.search(r"\bopen\s*\(|\bPath\b|\bpathlib\b|\bshutil\b|\bos\.remove\b|\bos\.mkdir\b|\bglob\b", src):
+        needs.append("files")
+    return needs
+
+
+def infer_declared_needs(code: str, tool_name: Optional[str] = None) -> List[str]:
+    """Scan synthesised server source for the capability buckets it touches.
+
+    The Creators page shows a NETWORK / FILES / COMMANDS grid per tool, and
+    the approval gate needs to know what a verb can do before it has ever
+    run. The model *declares* needs in the manifest; this scan is both a
+    safety net (a tool that shells out while declaring nothing still gets
+    'commands') and the fallback for manifests written before the field
+    existed.
+
+    When ``tool_name`` is given we scope the scan to just that function's
+    body (via AST), so a server that only fetches URLs in one verb does not
+    smear 'network' across every other pure-calculation verb. If the named
+    function cannot be found we return nothing rather than the whole-module
+    floor, because at that point the model's own declaration is the better
+    signal. With no ``tool_name`` (a single-purpose lightweight feature) we
+    scan the whole source.
+    """
+    src = code or ""
+    if tool_name:
+        try:
+            tree = ast.parse(src)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                        and node.name == tool_name:
+                    body = ast.get_source_segment(src, node) or ""
+                    return _scan_needs(body)
+        except Exception:
+            pass
+        return []
+    return _scan_needs(src)
 
 
 def _get_gemini_api_key() -> str:
@@ -172,14 +218,33 @@ class MCPForge:
                 "telemetry": telemetry,
             }
 
+        # A reforge replaces a server that is already live. Snapshot the old
+        # files first so a new build that fails its live checks can be rolled
+        # back instead of leaving Saturn with a broken capability on disk.
+        rolled_back = cls._snapshot_for_rollback(actual_name)
+        prev_version = None
+        if rolled_back:
+            try:
+                old_manifest = json.loads(
+                    (Path(rolled_back[0]).parent / "manifest.json").read_text(encoding="utf-8"))
+                prev_version = old_manifest.get("version")
+            except Exception:
+                prev_version = None
+
         # Emit files.
         try:
-            server_path, manifest_path = cls._emit_files(actual_name, code, manifest, test_cases)
+            server_path, manifest_path = cls._emit_files(
+                actual_name, code, manifest, test_cases, goal=goal, prev_version=prev_version)
         except Exception as exc:
+            if rolled_back:
+                cls._restore_snapshot(rolled_back)
             return {"success": False, "message": f"Failed writing MCP server files: {exc}"}
 
-        # Register live. If this fails we still keep the files so the user can
-        # debug or add them by hand.
+        # Register live. hot_register boots the freshly written server.py and
+        # leaves any previous instance untouched when the boot fails, so a
+        # failed reforge means the new files are bad while the old capability
+        # is still serving from memory. Roll the folder back and keep that old
+        # build registered so nothing downstream sees the broken rewrite.
         from core.mcp_manager import UniversalMCPManager
         cfg = {
             "command": _mcp_server_python(),
@@ -191,6 +256,20 @@ class MCPForge:
         reg_ok, reg_msg = UniversalMCPManager.get_instance().hot_register(actual_name, cfg)
         if not reg_ok:
             logger.warning(f"[MCPForge] Live registration failed: {reg_msg}. Files still on disk.")
+            if rolled_back:
+                cls._restore_snapshot(rolled_back)
+                logger.info(f"[MCPForge] Rolled '{actual_name}' back to its previous build.")
+                return {
+                    "success": False,
+                    "tier": "portable",
+                    "name": actual_name,
+                    "rolled_back": True,
+                    "message": (
+                        f"Re-forge of '{actual_name}' failed its live checks "
+                        f"({reg_msg}); rolled back to the previous build, which "
+                        f"stays registered and running."
+                    ),
+                }
 
         return {
             "success": True,
@@ -201,6 +280,8 @@ class MCPForge:
             "manifest_path": str(manifest_path),
             "tools": [t.get("name") for t in manifest.get("tools", []) if t.get("name")],
             "live_registered": reg_ok,
+            "version": manifest.get("version", "1.0.0"),
+            "prev_version": prev_version,
             "message": (
                 f"Forged portable MCP server '{actual_name}'. "
                 f"{len(manifest.get('tools', []))} tool(s) verified in the sandbox; "
@@ -217,6 +298,45 @@ class MCPForge:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    @staticmethod
+    def _snapshot_for_rollback(name: str) -> list:
+        """Copy the live server.py + manifest.json to ``*.bak`` before a
+        (re)forge overwrites them. Returns the (original, backup) pairs so
+        ``_restore_snapshot`` can put the previous build back when the new
+        one fails its live checks. Empty list = brand-new server, nothing
+        to roll back to."""
+        target = MCP_SKILLS_DIR / name
+        pairs = []
+        for fname in ("server.py", "manifest.json"):
+            src = target / fname
+            if src.exists():
+                dst = src.with_name(fname + ".bak")
+                try:
+                    shutil.copy2(src, dst)
+                    pairs.append((src, dst))
+                except Exception as exc:
+                    logger.warning(f"[MCPForge] Could not back up {src.name}: {exc}")
+        return pairs
+
+    @staticmethod
+    def _restore_snapshot(pairs: list) -> None:
+        """Put the pre-reforge files back over the failed rewrite."""
+        for src, bak in pairs:
+            try:
+                shutil.copy2(bak, src)
+            except Exception as exc:
+                logger.warning(f"[MCPForge] Rollback of {src.name} failed: {exc}")
+
+    @staticmethod
+    def _bump_version(prev: Optional[str]) -> str:
+        """1.0.3 -> 1.0.4 on a reforge; anything unreadable restarts at
+        1.0.1 so the manifest always carries a sane dotted version."""
+        parts = str(prev or "").strip().split(".")
+        if len(parts) == 3 and parts[-1].isdigit():
+            parts[-1] = str(int(parts[-1]) + 1)
+            return ".".join(parts)
+        return "1.0.1"
+
     @classmethod
     def _emit_files(
         cls,
@@ -224,16 +344,46 @@ class MCPForge:
         code: str,
         manifest: Dict[str, Any],
         test_cases: List[Dict[str, Any]],
+        goal: str = "",
+        prev_version: Optional[str] = None,
     ) -> Tuple[Path, Path]:
         """Write server.py + manifest.json + test_cases.json under mcp_skills/<name>/."""
         target = cls._server_dir(name)
 
         manifest["name"] = name
         manifest["tier"] = "portable"
+        # The original request text survives in the manifest so the Creators
+        # page can show "Made from: ..." and so a reforge (manual or by the
+        # health sweep) can replay the goal instead of a description guess.
+        if goal:
+            manifest["goal"] = str(goal)
+        first_forged = manifest.get("first_forged_at") or manifest.get("created_at")
+        manifest["first_forged_at"] = first_forged or time.time()
         manifest["created_at"] = time.time()
-        manifest["version"] = manifest.get("version", "1.0.0")
+        manifest["reforged"] = bool(prev_version)
+        if prev_version:
+            manifest["previous_version"] = prev_version
+            manifest["version"] = cls._bump_version(prev_version)
+        else:
+            manifest["version"] = manifest.get("version", "1.0.0")
         manifest["author"] = "Project Saturn Autonomous MCP Forge"
         manifest["active"] = True
+        # Per-tool declared needs, the raw material for the approval gate and
+        # the Creators page's NETWORK/FILES/COMMANDS grid. The model declares
+        # them; a scan of the actual source is the safety net and the union
+        # wins, so a verb that shells out cannot declare its way to silence.
+        from core.permissions import DECLARED_NEEDS as _VALID_NEEDS
+        from core.permissions import classify_defaults as _classify
+        for t in manifest.get("tools", []) or []:
+            if not isinstance(t, dict):
+                continue
+            declared = [str(r).lower() for r in (t.get("requires") or [])
+                        if str(r).lower() in _VALID_NEEDS]
+            t["requires"] = sorted(set(declared)
+                                   | set(infer_declared_needs(code, t.get("name"))))
+            t["permission_default"] = _classify(
+                t["requires"], str(t.get("name", "")),
+                str(t.get("description", "")))
 
         header = (
             f'"""\n'
@@ -448,6 +598,7 @@ Output MUST be a single JSON object with exactly this shape:
       {
         "name": "tool_fn_name",
         "description": "what this specific verb does",
+        "requires": ["network"],
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -468,6 +619,12 @@ Output MUST be a single JSON object with exactly this shape:
 The `test_cases` MUST contain at least one entry per declared tool plus one
 discovery-only entry with `tool=null` (which just checks `tools/list`
 returns successfully).
+
+Each tool's `requires` is a list drawn from "network", "files", "commands"
+(use [] for a pure in-process calculation) naming what that verb touches.
+Saturn shows this declaration to the user and gates risky calls on it, so it
+must be honest - an omitted need is caught by Saturn's own scan of the code
+and only makes the gate stricter, never looser.
 
 Return ONLY this JSON object with no markdown fences around it.
 """

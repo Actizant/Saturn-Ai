@@ -2785,6 +2785,11 @@ class SaturnLive:
         self.ui.on_text_command = self._on_text_command
         self.ui.on_attention_action = self._on_attention_action
         self.ui.on_remote_clicked = self._make_remote_key
+        # The Creators shelf forges through the same pipeline a spoken
+        # "make me a feature" command uses, so a typed goal or a Reforge click
+        # lands a real capability rather than a mock.
+        self.ui.on_forge_request = self._forge_skill
+        self.ui.on_reforge_request = self._reforge_from_creators
         # The briefing page reads its walk aloud through this seam, so each
         # sentence goes down the same funnel as everything else Saturn says
         # (mute respected, subtitles kept, live voice preferred).
@@ -4944,14 +4949,64 @@ class SaturnLive:
                     self.ui.write_log(f"Result:\n{execution_output}")
             except Exception:
                 pass
+            # Land the tier chip on the Tasks workspace and refresh the Creators
+            # shelf (drops any 'forging' badge). Thread-safe via the UI signal.
+            try:
+                self.ui.note_forge_result(feature_name, tier, goal)
+            except Exception:
+                pass
             self.speak(announcement)
         else:
             try:
                 self.ui.write_log(f"ERR: {message}")
             except Exception:
                 pass
+            # A failed forge registered nothing, so no chip is earned - but the
+            # Creators 'forging' badge must still clear.
+            try:
+                self.ui.creators_forge_finished()
+            except Exception:
+                pass
             self.speak(message)
         return message
+
+    def _reforge_from_creators(self, name: str, tier: str) -> str:
+        """Re-forge a capability from its stored goal, launched from the Creators
+        shelf's Reforge button. Manually configured servers reach here without a
+        forge source, so they are refused (their button is disabled in the UI,
+        this guard is the backstop). Runs on a worker thread."""
+        tier = "mcp" if str(tier or "").lower() in ("mcp", "portable", "mcp server") else "feature"
+        goal = ""
+        try:
+            if tier == "mcp":
+                from core.mcp_forge import MCPForge
+                known = {m.get("name"): m for m in MCPForge.list_forged()}
+                man = known.get(name)
+                if not man or man.get("tier") != "portable":
+                    msg = f"'{name}' is not a Saturn-forged server, so there is nothing to re-forge."
+                    self.speak(msg)
+                    return msg
+                goal = man.get("goal") or man.get("description") or f"Re-forge {name}"
+            else:
+                from core.dynamic_registry import DynamicToolRegistry
+                man = next((s for s in DynamicToolRegistry.list_skills()
+                            if s.get("name") == name), None)
+                goal = (man or {}).get("goal") or (man or {}).get("description") or f"Re-forge {name}"
+        except Exception as exc:
+            msg = f"Could not read the original goal for '{name}': {exc}"
+            try:
+                self.ui.write_log(f"ERR: {msg}")
+            except Exception:
+                pass
+            self.speak(msg)
+            try:
+                self.ui.creators_forge_finished()
+            except Exception:
+                pass
+            return msg
+        # Route through the normal forge so the tier re-classifies and the result
+        # lands with the same Tasks chip + Creators refresh as a fresh forge.
+        return self._forge_skill(goal, skill_name=name)
 
     def _run_confirmed_skill(self, skill_name: str, arguments: dict) -> str:
         from core.dynamic_registry import DynamicToolRegistry

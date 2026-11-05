@@ -71,6 +71,16 @@ def bind(show, hide, log=None) -> None:
     _show_cb, _hide_cb, _log_cb = show, hide, log
 
 
+def is_bound() -> bool:
+    """True when an interface can actually show the banner.
+
+    Callers that *prefer* a gate but must keep working headless (tests, the
+    CLI, a very early boot) use this to decide between asking and allowing;
+    the irreversible-action callers deliberately do not - for them an
+    unbound interface means refusal."""
+    return _show_cb is not None
+
+
 def _log(msg: str) -> None:
     if _log_cb:
         try:

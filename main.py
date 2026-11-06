@@ -2343,7 +2343,7 @@ TOOL_DECLARATIONS = [
                 "action": {"type": "STRING", "description": "open | show | hide | status | tools | design | run | clear | save | open_file | tool | zoom | undo | redo | read | describe"},
                 "brief": {"type": "STRING", "description": "With design: what to draw, in the user's own words ('a login screen with a dark hero band')."},
                 "style": {"type": "STRING", "description": "With design: any style instruction the user added - colours, mood, brand, size of type."},
-                "tool": {"type": "STRING", "description": "With run: the engine tool's own name, as listed by tools. With tool: a canvas tool to hold (SELECT, FRAME, RECTANGLE, ELLIPSE, LINE, TEXT, PEN, HAND)."},
+                "tool": {"type": "STRING", "description": "With run: the engine tool's own name, as listed by tools. With tool: a canvas tool to hold (SELECT, FRAME, RECTANGLE, ELLIPSE, LINE, TEXT)."},
                 "arguments": {"type": "OBJECT", "description": "With run: the arguments for that engine tool, exactly as its description names them."},
                 "id": {"type": "STRING", "description": "With describe: the layer to describe. Omit to ask about the last thing drawn."},
                 "path": {"type": "STRING", "description": "With open_file: a .saturn document to load onto the canvas. Saturn reads its own format, not .fig files."},

@@ -163,10 +163,19 @@ def test_undo_and_redo_walk_a_snapshot_history():
     assert len(state.document.layers) == 1
 
 
-def test_set_tool_accepts_the_eight_the_bar_ships_and_refuses_others():
+def test_set_tool_accepts_the_real_modes_and_refuses_undrawn_ones():
+    """The held tool names a scene kind the engine acts on; freehand / grab-pan
+    are refused by name because the gesture layer does not implement them."""
+    from saturn_studio.native.state import TOOLS
+
+    assert set(TOOLS) == {"SELECT", "FRAME", "RECTANGLE", "ELLIPSE", "LINE", "TEXT"}
+    assert "PEN" not in TOOLS and "HAND" not in TOOLS
+
     state = StudioState()
-    assert state.set_tool("text")["ok"] is True and state.tool == "TEXT"
+    for name in TOOLS:
+        assert state.set_tool(name.lower())["ok"] is True and state.tool == name
     assert state.set_tool("spray")["ok"] is False
+    assert state.set_tool("pen")["ok"] is False          # refused, not held
 
 
 # --------------------------------------------------------------------------- #

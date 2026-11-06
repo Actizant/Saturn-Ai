@@ -19,10 +19,13 @@ from typing import Optional
 
 from saturn_studio.native import scene
 
-#: The tools the studio bar exposes, in bar order -- the same eight the router
-#: advertises (in ``main.py`` and ``agent/planner.py``), so a voice request means
-#: the same thing end to end.
-TOOLS = ("SELECT", "FRAME", "RECTANGLE", "ELLIPSE", "LINE", "TEXT", "PEN", "HAND")
+#: The selectable active-tool modes, in the order the router lists them (in
+#: ``main.py`` and ``agent/planner.py``). Each names a scene kind the engine
+#: actually understands -- selection or one of the five node types it renders.
+#: Freehand (PEN) and grab-pan (HAND) are deliberately absent: the gesture layer
+#: implements select/move/resize and wheel-pan, so a tool that implied drawing a
+#: path or dragging-to-pan would promise an interaction the canvas does not do.
+TOOLS = ("SELECT", "FRAME", "RECTANGLE", "ELLIPSE", "LINE", "TEXT")
 
 #: Undo history is capped; the oldest steps fall away first.
 UNDO_LIMIT = 64

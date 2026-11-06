@@ -22,6 +22,12 @@ import winsound
 
 import pytest
 
+try:  # importing ``main`` pulls the vision stack, which needs cv2
+    import cv2  # noqa: F401
+except Exception:  # cv2's binding fails to load on some interpreters (e.g. py3.14)
+    pytest.skip("cv2 unavailable in this interpreter; main imports the vision stack",
+                allow_module_level=True)
+
 import main
 from main import SaturnLive
 

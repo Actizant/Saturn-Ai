@@ -230,7 +230,7 @@ saturn_studio
   action: "open" | "show" | "hide" | "status" | "tools" | "design" | "run" | "clear" | "save" | "open_file" | "tool" | "zoom" | "undo" | "redo" | "read" | "describe" (required)
   brief: string (with design: what to draw, in the user's own words)
   style: string (with design: colours, mood, brand, type size the user asked for)
-  tool: string (with run: an engine tool name from "tools"; with tool: SELECT, FRAME, RECTANGLE, ELLIPSE, LINE, TEXT, PEN or HAND)
+  tool: string (with run: an engine tool name from "tools"; with tool: SELECT, FRAME, RECTANGLE, ELLIPSE, LINE or TEXT)
   arguments: object (with run: that tool's own arguments)
   id: string (with describe: which layer to talk about)
   path: string (with open_file: a .saturn document to load; Saturn reads its own format, not .fig files)

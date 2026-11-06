@@ -51,6 +51,9 @@ Point it at a breadboard or describe a part over voice and it maps microcontroll
 **Work with documents.**
 Draft Word reports and résumés, assemble Excel models with live formulas and charts, lay out branded slide decks, and merge, split or extract PDFs.
 
+**Design on a canvas by speaking.**
+Say what you want — *"a login screen with a dark hero band"* — and Saturn's Studio draws it as real layers on an on-screen canvas: frames, text, shapes and auto-layout it computes itself. Ask what's on the board and it reports exactly what it made, then exports PNG or vector SVG, or saves in Saturn's own `.saturn` format. The engine is Saturn's own clean-room Python/Qt work rendered in-process — no browser, no loopback server, nothing phoned home.
+
 **Reverse engineer anything.**
 Point it at a live website and it lifts the DOM, maps the API surface, then rebuilds a clean working clone with a mock backend. Hand it a `.exe`, an Electron app or a `.wasm` and it extracts binary layout, security mitigations and function pseudocode — full evidence preserved, target content quarantined as untrusted.
 

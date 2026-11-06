@@ -19240,9 +19240,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_creator_tools_page"):
                 self._creator_tools_page.refresh()
         elif key == "design":
-            # SATURN STUDIO: the native design canvas. The page boots its own
-            # loopback engine the first time it is shown, so arriving here is
-            # just a stack switch; a missing engine tree says so on the page.
+            # SATURN STUDIO: the native design canvas. It is an in-process Qt
+            # widget built when the stack was assembled, so arriving here is
+            # just a stack switch; if it could not build, the page says why.
             if hasattr(self, "_center_stack"):
                 self._center_stack.setCurrentIndex(_PAGE_DESIGN)
         elif key == "set":
@@ -21211,8 +21211,8 @@ class MainWindow(QMainWindow):
         self._creator_tools_page.open_capability.connect(self._open_capability_in_creators)
         self._center_stack.addWidget(self._creator_tools_page)
 
-        # Design (index 11) is Saturn Studio: the canvas widget hosts a built
-        # static engine tree over loopback and starts it lazily on first show.
+        # Design (index 11) is Saturn Studio: Saturn's own native Qt design
+        # canvas, an in-process QWidget with no browser, server or JS bridge.
         # If the widget cannot exist at all the page still occupies its index
         # and reports the reason honestly - the rail row is never a dead button.
         try:

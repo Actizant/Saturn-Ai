@@ -226,6 +226,16 @@ geospatial_globe
   query: string (for nearby places)
   Saturn's own globe draws live aircraft, satellites and ISS passes, earthquakes and the OpenStreetMap building register, and it reports its own figures -- ask it what it sees instead of describing it from memory. Routes, driving directions, weather, nearby places and the radar overlay are answered by the older map engine.
 
+saturn_studio
+  action: "open" | "show" | "hide" | "status" | "tools" | "design" | "run" | "clear" | "save" | "open_file" | "tool" | "zoom" | "undo" | "redo" | "read" | "describe" (required)
+  brief: string (with design: what to draw, in the user's own words)
+  style: string (with design: colours, mood, brand, type size the user asked for)
+  tool: string (with run: an engine tool name from "tools"; with tool: SELECT, FRAME, RECTANGLE, ELLIPSE, LINE, TEXT, PEN or HAND)
+  arguments: object (with run: that tool's own arguments)
+  id: string (with describe: which layer to talk about)
+  path: string (with open_file: a .saturn document to load; Saturn reads its own format, not .fig files)
+  Saturn's design canvas. "open your studio" and "design this" are this tool: it puts the canvas on screen, draws the brief itself, and says what it made -- ask it what is on the board instead of describing a drawing from memory.
+
 call_screening
   action: "start" | "take_over" | "hang_up" (required)
   caller: string (optional)

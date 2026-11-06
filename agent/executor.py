@@ -388,6 +388,15 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None, player: Any 
         parent = getattr(player, "_win", None) if player else None
         return map_tool(parameters, parent=parent)
 
+    elif tool == "saturn_studio":
+        # The same router the voice loop calls, so a plan that says "design a
+        # login screen" and a sentence spoken at the mic draw on one canvas and
+        # are answered by the same engine, not by two vocabularies.
+        from saturn_studio.tool import saturn_studio as studio_tool
+
+        parent = getattr(player, "_win", None) if player else None
+        return studio_tool(parameters, parent=parent)
+
     elif tool == "call_screening":
         p = parameters or {}
         action = str(p.get("action", "start")).lower()

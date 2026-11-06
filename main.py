@@ -2335,6 +2335,25 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "saturn_studio",
+        "description": "Saturn's design canvas. It opens on the Design page and draws what it is told to draw, then reports what it actually made: the layer it created, its type, how many children it has, and anything the engine said to look at. Ask the canvas what is on it instead of describing a drawing from memory. 'design' takes a plain-language brief and is the verb for 'open your studio and design this'.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING", "description": "open | show | hide | status | tools | design | run | clear | save | open_file | tool | zoom | undo | redo | read | describe"},
+                "brief": {"type": "STRING", "description": "With design: what to draw, in the user's own words ('a login screen with a dark hero band')."},
+                "style": {"type": "STRING", "description": "With design: any style instruction the user added - colours, mood, brand, size of type."},
+                "tool": {"type": "STRING", "description": "With run: the engine tool's own name, as listed by tools. With tool: a canvas tool to hold (SELECT, FRAME, RECTANGLE, ELLIPSE, LINE, TEXT, PEN, HAND)."},
+                "arguments": {"type": "OBJECT", "description": "With run: the arguments for that engine tool, exactly as its description names them."},
+                "id": {"type": "STRING", "description": "With describe: the layer to describe. Omit to ask about the last thing drawn."},
+                "path": {"type": "STRING", "description": "With open_file: a .saturn document to load onto the canvas. Saturn reads its own format, not .fig files."},
+                "x": {"type": "NUMBER", "description": "Optional X position for a new design."},
+                "y": {"type": "NUMBER", "description": "Optional Y position for a new design."}
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "call_screening",
         "description": "Screens an incoming call with Saturn as an AI attendant. Answering always waits for the user to confirm on the Echo HUD.",
         "parameters": {
@@ -5856,6 +5875,14 @@ class SaturnLive:
                 from saturn_view.tool import geospatial_globe as map_tool
                 result = await loop.run_in_executor(
                     None, lambda: map_tool(args, parent=self.ui._win)
+                )
+            elif name == "saturn_studio":
+                # Same reason as the map tool, and the same shape: the canvas is
+                # a page, so every request waits on the GUI thread and on the
+                # engine's own answer. A design brief also costs a model call.
+                from saturn_studio.tool import saturn_studio as studio_tool
+                result = await loop.run_in_executor(
+                    None, lambda: studio_tool(args, parent=self.ui._win)
                 )
             elif name == "call_screening":
                 action = (args.get("action") or "start").lower().strip()

@@ -94,3 +94,18 @@ gradle-8.7-bin.zip
 setup_android_sdk.ps1
 build_apk.ps1
 process_logo.py
+
+# Local-only working material: reference mockups and one-off drivers. These
+# live beside the repository on the dev machine and must never be swept into a
+# publication commit by `git add -A`.
+_design_saturn_final*/
+_saturn_*_ref/
+_op*.py
+_op*.log
+_op*.txt
+_op*.png
+
+# Archived copies of the retired vendored web design engine. Kept on disk as a
+# local safety backup only; must never be published (large + foreign-branded).
+saturn_studio/web-engine-backup.zip
+saturn_studio/**/*-backup.zip

@@ -117,6 +117,9 @@ _PAGE_CREATORS = 9
 # Creator Tools (the design's crpage) - the MCP wiring bench the rail's
 # "Creator Tools" row owns, appended after Creators so every index above holds.
 _PAGE_TOOLS = 10
+# Design (Saturn Studio) - the native design canvas the rail's "Design" row
+# owns, appended after Creator Tools so every index above keeps its owner.
+_PAGE_DESIGN = 11
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -7160,6 +7163,7 @@ _IC_PATHS = {
     "files":  "M6 3h8l4 4v14H6zM14 3v4h4",
     "cre":    "M11 3l1.6 4.4L17 9l-4.4 1.6L11 15l-1.6-4.4L5 9l4.4-1.6zM17 14l.8 2.2L20 17l-2.2.8L17 20l-.8-2.2L14 17l2.2-.8z",
     "tools":  "M4 20l9-9M14 4l6 6-3 3-6-6z",
+    "design": "M4 4h10v10H4zM19 19m-5 0a5 5 0 1010 0a5 5 0 10-10 0",
     "set":    "M12 9a3 3 0 100 6 3 3 0 000-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2",
     "und":    "M12 3a6 6 0 00-3 11v3h6v-3a6 6 0 00-3-11zM9 21h6",
     "plan":   "M6 12h.01M18 6h.01M18 18h.01M8 11l8-4M8 13l8 4",
@@ -16847,7 +16851,7 @@ class CommandNavSidebar(QFrame):
         ("chat", "Chat"), ("tasks", "Tasks"), ("brief", "Briefing"),
         ("memory", "Memory"), ("obs", "Observations"), ("files", "Files"),
         ("dev", "Devices"), ("cre", "Creators"), ("tools", "Creator Tools"),
-        ("set", "Settings"),
+        ("design", "Design"), ("set", "Settings"),
     ]
 
     def __init__(self, parent=None):
@@ -19235,6 +19239,12 @@ class MainWindow(QMainWindow):
                 self._center_stack.setCurrentIndex(_PAGE_TOOLS)
             if hasattr(self, "_creator_tools_page"):
                 self._creator_tools_page.refresh()
+        elif key == "design":
+            # SATURN STUDIO: the native design canvas. The page boots its own
+            # loopback engine the first time it is shown, so arriving here is
+            # just a stack switch; a missing engine tree says so on the page.
+            if hasattr(self, "_center_stack"):
+                self._center_stack.setCurrentIndex(_PAGE_DESIGN)
         elif key == "set":
             self._on_nav_settings()
         self._update_nav_styles()
@@ -19463,7 +19473,8 @@ class MainWindow(QMainWindow):
         cur = self._center_stack.currentIndex() if hasattr(self, "_center_stack") else 0
         key_by_page = {2: "dev", 4: "set", _PAGE_VISION: "obs", _PAGE_MEMORY: "memory",
                        _PAGE_TASKS: "tasks", _PAGE_BRIEF: "brief",
-                       _PAGE_CREATORS: "cre", _PAGE_TOOLS: "tools"}
+                       _PAGE_CREATORS: "cre", _PAGE_TOOLS: "tools",
+                       _PAGE_DESIGN: "design"}
         # Home (the command centre, index 0) keeps the Chat row lit the way the
         # mockup opens with the first row active. The retired right-hand chat
         # slide-in no longer drives the highlight, so this is purely page-based.
@@ -21199,6 +21210,21 @@ class MainWindow(QMainWindow):
         self._creator_tools_page = CreatorToolsPage()
         self._creator_tools_page.open_capability.connect(self._open_capability_in_creators)
         self._center_stack.addWidget(self._creator_tools_page)
+
+        # Design (index 11) is Saturn Studio: the canvas widget hosts a built
+        # static engine tree over loopback and starts it lazily on first show.
+        # If the widget cannot exist at all the page still occupies its index
+        # and reports the reason honestly - the rail row is never a dead button.
+        try:
+            from saturn_studio.window import StudioWindow
+            self._studio_page = StudioWindow(parent=self)
+        except Exception as exc:  # noqa: BLE001 -- keep the stack index stable
+            self._studio_page = QLabel(
+                f"SATURN STUDIO UNAVAILABLE - {exc}")
+            self._studio_page.setStyleSheet(
+                f"color: {C.ACC}; background: #0b0e14; font-family: {C.F_MONO};"
+                " font-size: 12px; padding: 24px; border: none;")
+        self._center_stack.addWidget(self._studio_page)
         
         self._center_stack.setCurrentIndex(0)
         # The nav pill paints from the stack, not from the buttons, so a page

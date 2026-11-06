@@ -6,6 +6,12 @@ on:
     tags:
       - 'v*'
 
+# Least privilege: these jobs only read the repository and produce artifacts.
+# The default GITHUB_TOKEN is write; narrowing it here means a compromised
+# dependency or step cannot mutate the repo or push tags with this token.
+permissions:
+  contents: read
+
 jobs:
   build-windows:
     name: Build Windows Setup (.exe)
@@ -24,6 +30,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+
+      - name: Advisory dependency audit
+        # Surfaces known CVEs in the resolved environment without failing the
+        # release build. Replace continue-on-error with a real gate once
+        # requirements are pinned and the reported findings are cleared.
+        continue-on-error: true
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit --progress-spinner off
 
       - name: Build Uninstaller & Saturn
         run: |

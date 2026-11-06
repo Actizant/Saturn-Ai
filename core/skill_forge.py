@@ -276,7 +276,7 @@ Skill Architecture Guidelines:
    - In `execute(**kwargs)`, ALWAYS assign safe fallback defaults to all expected parameters (e.g. `query = kwargs.get('query') or kwargs.get('search') or 'headphones'`).
    - If called with empty kwargs `{}` (such as during sandbox verification), the skill MUST execute cleanly without throwing KeyError or TypeError.
 4. Resilient Network & Safe SSL Handling:
-   - When external live data or web downloads are needed, prefer `requests` with `timeout=8, verify=False`, OR if using `urllib`, ALWAYS bypass Windows SSL verification via `import ssl; ctx = ssl._create_unverified_context()` because Python on Windows frequently throws `[SSL: CERTIFICATE_VERIFY_FAILED]`.
+   - When external live data or web downloads are needed, use `requests` with `timeout=8` and LEAVE TLS verification ON. If a machine's system trust store has drifted (common on Windows, `[SSL: CERTIFICATE_VERIFY_FAILED]`), fix it by pinning the CA bundle, e.g. `import certifi; requests.get(url, timeout=8, verify=certifi.where())` or `urllib.request.urlopen(url, context=ssl.create_default_context(cafile=certifi.where()))`, with a `try/except ImportError` fallback to the default context. NEVER disable verification on the first try, and NEVER disable it for auth, payment or personal-data endpoints; `verify=False` is permitted only as a single last-resort retry inside a `try/except ssl.SSLCertVerificationError` for a public read-only data source, with a logged warning.
    - NEVER require or assume environment API keys (e.g. `GIPHY_API_KEY`, `OPENAI_API_KEY`). Skills must be 100% self-contained and run out of the box using public open APIs (such as Tenor public key `LIVDSRZULELA` or open REST) or local Python logic.
    - If any network call fails or times out, ALWAYS catch generic `Exception` and supply a working fallback so `execute()` NEVER returns an `{'error': ...}` dictionary.
    - Do NOT use heavy scrapers (avoid selenium/playwright).
@@ -391,7 +391,7 @@ Broken Code:
 Critical Repair Instructions:
 1. Ensure `def execute(**kwargs)` handles empty or missing kwargs with safe defaults.
 2. If using `matplotlib`, ensure `import matplotlib; matplotlib.use('Agg')` is placed before `pyplot`.
-3. If making HTTP requests, use `requests` with `timeout=8, verify=False` or `urllib` with `ssl._create_unverified_context()`. NEVER assume custom library exceptions or unset API keys (like GIPHY_API_KEY).
+3. If making HTTP requests, use `requests` with `timeout=8` and keep TLS verification ON; if a `CERTIFICATE_VERIFY_FAILED`/`SSLCertVerificationError` occurs, retry once with `verify=certifi.where()` (fallback to the default context if `certifi` is missing) rather than `verify=False`. NEVER assume custom library exceptions or unset API keys (like GIPHY_API_KEY).
 4. If downloading an image or media fails or has SSL errors, NEVER just return an error dictionary. Generate the image natively using PIL (Pillow) or matplotlib and save to `SaturnAI/deliverables/<name>.png`.
 5. Return a clean deliverable dictionary with `'image_path'`, `'title'`, `'summary'` if visual, or clean structured output.
 6. The test runner checks that the returned value does NOT contain an `'error'` key. Do not return `{{'error': '...'}}`. If an error occurs, provide a graceful fallback result.

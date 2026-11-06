@@ -39,7 +39,65 @@ BANNED_AST_PATTERNS = [
     "auto_heal_engine",
     "install_wizard",
     "build_exe",
+    # Shell-level destructive one-liners (matched against whole command strings
+    # and against every argument of a shell/subprocess call, joined)
+    "rm -rf",
+    "rm -fr",
+    "mkfs",
+    "dd if=",
+    "of=/dev",
+    "> /dev/sd",
+    "del /s",
+    "rd /s",
+    "takeown",
+    "reg delete",
+    "net user ",
+    "shutdown /",
+    ":(){ :|:& };:",
+    "chmod -r 777",
 ]
+
+# Deleting helpers whose target, when it resolves to a drive/OS root, is a
+# catastrophic wipe rather than ordinary temp-file cleanup.
+_DESTRUCTIVE_HELPERS = frozenset({"rmtree", "removedirs"})
+_SHELL_HELPERS = frozenset({"system", "popen", "run", "call", "check_output", "check_call", "Popen"})
+_ROOT_TARGETS = frozenset({"c:", "c:\\", "c:/", "/", "\\", "//", "d:", "d:\\"})
+
+
+def _fold_constant(node: ast.AST) -> Optional[str]:
+    """Best-effort literal string for a node, folding ``"a" + "b"`` and simple
+    f-strings so an obfuscated command like ``"disk" + "part"`` is seen whole.
+    Returns None when the value is not statically known."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold_constant(node.left)
+        right = _fold_constant(node.right)
+        if left is not None and right is not None:
+            return left + right
+        return None
+    if isinstance(node, ast.JoinedStr):  # f"..."
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            elif isinstance(value, ast.FormattedValue):
+                inner = _fold_constant(value.value)
+                parts.append(inner if inner is not None else "")
+            else:
+                return None
+        return "".join(parts)
+    return None
+
+
+def _call_basename(func: ast.AST) -> str:
+    """The trailing name of a call target: ``os.system`` -> ``system``."""
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
 
 STANDARD_LIB_MODULES = {
     "abc", "argparse", "array", "ast", "asyncio", "base64", "binascii", "bisect",
@@ -120,15 +178,44 @@ class SkillCrucible:
         if not has_execute:
             return False, "Skill code must define an 'execute(**kwargs)' or 'async def execute(**kwargs)' function."
 
-        # Safety scans for banned keywords in string literals or function calls
+        # Safety scans. Three layers, so a token split across a concatenation,
+        # an f-string or a subprocess argument list is still caught:
+        #   1. any statically-foldable string, checked against the blocklist;
+        #   2. shell/subprocess call arguments, joined then checked;
+        #   3. delete helpers (rmtree/removedirs) pointed at a drive/OS root.
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                val_lower = node.value.lower()
+            folded = _fold_constant(node)
+            if folded:
+                folded_lower = folded.lower()
                 for banned in BANNED_AST_PATTERNS:
-                    if banned in val_lower:
+                    if banned in folded_lower:
                         return False, f"Security Violation: Prohibited term or system path '{banned}' detected."
 
+            if isinstance(node, ast.Call):
+                name = _call_basename(node.func)
+                # 2. flatten the arguments into one command string
+                if name in _SHELL_HELPERS:
+                    pieces: List[str] = []
+                    for arg in list(node.args) + [kw.value for kw in node.keywords]:
+                        chunks = list(arg.elts) if isinstance(arg, (ast.List, ast.Tuple)) else [arg]
+                        for chunk in chunks:
+                            text = _fold_constant(chunk)
+                            if text:
+                                pieces.append(text)
+                    command = " ".join(pieces).lower()
+                    for banned in BANNED_AST_PATTERNS:
+                        if banned in command:
+                            return False, f"Security Violation: Prohibited command '{banned}' detected in a shell call."
+                # 3. a recursive delete aimed at the root / a system path
+                if name in _DESTRUCTIVE_HELPERS and node.args:
+                    target = _fold_constant(node.args[0])
+                    if target is not None and target.strip().strip("\"'").lower().rstrip("\\/") in (
+                        "c:", "d:", "", "/"
+                    ):
+                        return False, "Security Violation: Refusing a recursive delete of a drive/OS root."
+
         return True, None
+
 
     @staticmethod
     def extract_dependencies(code_str: str) -> List[str]:

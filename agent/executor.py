@@ -223,6 +223,11 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None, player: Any 
     elif tool == "web_search":
         from actions.web_search import web_search
         return web_search(parameters=parameters, player=player) or "Done."
+
+    elif tool == "job_posting_guard":
+        from actions.job_posting_guard import job_posting_guard
+        return job_posting_guard(parameters=parameters, player=player) or "Done."
+
     elif tool == "game_updater":
         from actions.game_updater import game_updater
         return game_updater(parameters=parameters, player=player, speak=speak) or "Done."

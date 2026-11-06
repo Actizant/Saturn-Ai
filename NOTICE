@@ -24,5 +24,19 @@ library or canvas rasterizer -- the Saturn Studio shell, verbs, scene model and
 every Saturn verb are original works of Actizant, covered by this repository's
 Apache License, Version 2.0.
 
+The posting integrity gate in core/posting_guard.py and its voice surface in
+actions/job_posting_guard.py are ported and adapted from the ai-job-search
+project, which Saturn does not vendor wholesale: Saturn took the gate, rewrote
+its entry points and reporting for Saturn's architecture, and verified the
+port case-by-case against the original behaviour.
+
+  ai-job-search posting integrity gate (tools/posting_guard.py, tools/page_decode.py)
+  Copyright (c) 2026 Mads Lorentzen
+  Licensed under the MIT License
+  https://github.com/ai-job-search-dev/ai-job-search
+
+The full MIT copyright and permission notice is reproduced in
+core/posting_guard.LICENSE.
+
 The Saturn name, wordmark and logo are trademarks of Actizant and are not
 granted by the Apache License. See TRADEMARK.md.

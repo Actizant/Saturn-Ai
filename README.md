@@ -51,6 +51,9 @@ Point it at a breadboard or describe a part over voice and it maps microcontroll
 **Work with documents.**
 Draft Word reports and résumés, assemble Excel models with live formulas and charts, lay out branded slide decks, and merge, split or extract PDFs.
 
+**Hunt for a job without losing the thread.**
+Ask what's open and Saturn searches the live job boards it can actually reach, lists the postings with their links, and tracks the roles you care about — a local record of what you've seen, saved in your own data folder and keyed per role. It names the boards it has proven and never invents a listing, and drafting or submitting applications stays deliberately off until that capability is built and reviewed: it will tell you plainly that it did *not* apply.
+
 **Design on a canvas by speaking.**
 Say what you want — *"a login screen with a dark hero band"* — and Saturn's Studio draws it as real layers on an on-screen canvas: frames, text, shapes and auto-layout it computes itself. Ask what's on the board and it reports exactly what it made, then exports PNG or vector SVG, or saves in Saturn's own `.saturn` format. The engine is Saturn's own clean-room Python/Qt work rendered in-process — no browser, no loopback server, nothing phoned home.
 
@@ -91,6 +94,7 @@ A few things to say:
 | Self-extension | *"Saturn, learn a skill that tracks the International Space Station."* |
 | Media | *"Play Starboy on Spotify."* |
 | Documents | *"Build me a project roadmap in Excel."* |
+| Job hunt | *"Saturn, find entry-level data-analyst roles in Bengaluru."* |
 | Housekeeping | *"Free up memory and close the heaviest apps."* |
 
 ---
@@ -107,6 +111,7 @@ Saturn-Ai/
 │   ├── circuit_assembler.py
 │   ├── geospatial_globe.py
 │   ├── auto_heal_engine.py
+│   ├── job_portal.py
 │   └── office_builder.py
 ├── core/                   # engine: prompt, memory, skills, registry, identity
 │   ├── briefing_sources.py # live weather / markets / news for the briefing

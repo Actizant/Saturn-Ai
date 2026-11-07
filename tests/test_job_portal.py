@@ -45,7 +45,13 @@ def _source(relative):
 
 def _schema_verbs():
     """The verbs main.py's job_portal declaration advertises to the model."""
-    block = _source("main.py").split('"name": "job_portal"', 1)[-1]
+    main = _source("main.py")
+    # Guard the advertised list itself: if the tool is dropped from the schema
+    # the split below silently returns the whole file and matches some *other*
+    # tool's action line, so a missing tool would look like a passing verb set.
+    assert '"name": "job_portal"' in main, \
+        "job_portal is not in the advertised tool list the model reads"
+    block = main.split('"name": "job_portal"', 1)[-1]
     match = re.search(r'"action":\s*\{[^{}]*"description":\s*"([^"]+)"', block)
     assert match, "no action description found in the job_portal schema"
     return {part.strip() for part in match.group(1).split("|")}
@@ -347,6 +353,28 @@ def test_the_agent_executor_routes_the_same_tool():
     source = _source("agent/executor.py")
     assert 'elif tool == "job_portal":' in source
     assert "from actions.job_portal import job_portal" in source
+
+
+def test_job_portal_is_fully_wired():
+    """The one glanceable answer to 'is job_portal wired into the app?'
+
+    A live request travels a chain of seams; if any one of them is missing,
+    Saturn honestly reports it cannot do the job -- which is what looked like
+    the feature being absent. Check every seam together so a single green here
+    means 'advertised, dispatched, planned and executed', and a red names the
+    seam that broke. (The running process must still be restarted to pick up a
+    freshly-added declaration -- this guards the code, not a stale process.)
+    """
+    main = _source("main.py")
+    assert '"name": "job_portal"' in main, "not advertised in the tool list the model reads"
+    assert 'elif name == "job_portal":' in main, "advertised but not dispatched in main.py"
+    assert "from actions.job_portal import job_portal as portal_tool" in main, \
+        "the dispatcher does not import the implementing action"
+    assert "\njob_portal\n" in _source("agent/planner.py"), "missing from the planner vocabulary"
+    assert 'elif tool == "job_portal":' in _source("agent/executor.py"), \
+        "not routed by the agent executor"
+    # The advertised verbs must equal exactly what the module can answer.
+    assert set(VERBS) == _schema_verbs() == _planner_verbs(), "advertised verbs drifted from the tool"
 
 
 # --------------------------------------------------------------------------- #

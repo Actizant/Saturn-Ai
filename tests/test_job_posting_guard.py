@@ -141,10 +141,8 @@ def test_a_saved_page_on_disk_is_gated_in_its_own_charset(tmp_path):
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize("verb, missing", [
-    ("search", "searching job portals"),
     ("draft", "drafting a CV or cover letter"),
     ("apply", "submitting an application"),
-    ("track", "tracking applications"),
 ])
 def test_a_verb_from_a_later_phase_is_refused_by_name(verb, missing):
     answer = job_posting_guard({"action": verb, "text": "whatever"})
@@ -153,6 +151,16 @@ def test_a_verb_from_a_later_phase_is_refused_by_name(verb, missing):
     # The refusal lists what does exist, so the caller is not left guessing.
     for real in VERBS:
         assert real in answer
+
+
+@pytest.mark.parametrize("verb", ["search", "track"])
+def test_a_verb_job_portal_honours_is_redirected_not_denied(verb):
+    """search and track are built - just not here. The gate points at the tool
+    that answers them rather than falsely claiming they are unbuilt phases."""
+    answer = job_posting_guard({"action": verb, "text": "whatever"})
+    assert "job_portal" in answer
+    assert "not what job_posting_guard does" in answer
+    assert "yet" not in answer  # it is not a missing capability
 
 
 def test_an_unrelated_verb_is_refused_without_pretending():
@@ -234,15 +242,32 @@ def test_the_skill_states_the_rule_and_the_live_verbs_only():
 def test_the_skill_names_the_phases_that_are_not_built_yet():
     text = SKILL_FILE.read_text(encoding="utf-8")
     section = text.split("## Not built yet", 1)[-1].split("##", 1)[0]
-    for unbuilt in ("search job portals", "cover letter", "submit applications", "track"):
+    # Portal search and local tracking now live in job_portal, so an honest
+    # skill must NOT list them among the unbuilt phases -- it names only what is
+    # genuinely missing (drafting material and submitting an application).
+    assert "search job portals" not in section
+    assert "track" not in section
+    for unbuilt in ("cover letter", "submit applications"):
         assert unbuilt in section, unbuilt
     assert "Never invent" in section
 
 
-def test_the_skill_file_does_not_advertise_a_verb_the_tool_refuses():
-    """A skill that promises 'apply' while the router refuses it is a false claim."""
+def test_the_skill_file_does_not_advertise_a_verb_no_tool_honours():
+    """A skill that promises a verb every tool refuses is a false claim.
+
+    'search' and 'track' left this list once job_portal became the verb that
+    honours them: Saturn can search a board and remember a role locally, so
+    saying so is true. Only drafting and submitting stay refused by both
+    job_posting_guard and job_portal, so the skill must not present them as
+    available verbs.
+    """
+    from actions.job_portal import _FUTURE_VERBS as PORTAL_FUTURE
+    from actions.job_posting_guard import _FUTURE_VERBS as GUARD_FUTURE
+
     text = SKILL_FILE.read_text(encoding="utf-8")
-    for verb in ("search", "draft", "apply", "track"):
+    refused_everywhere = set(GUARD_FUTURE) & set(PORTAL_FUTURE)
+    assert refused_everywhere == {"draft", "apply"}
+    for verb in refused_everywhere:
         assert f"`{verb}`" not in text, (
-            f"skills/job-search/SKILL.md advertises `{verb}`, which the tool refuses"
+            f"skills/job-search/SKILL.md advertises `{verb}`, which no tool answers"
         )

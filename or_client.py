@@ -71,6 +71,18 @@ RATE_LIMIT_COOLDOWN   = 60   # seconds before retrying a rate-limited model
 
 _rate_limited: dict[str, float] = {}
 
+
+class InsufficientCredits(RuntimeError):
+    """The account cannot pay, which is not a fault in the key or the connection.
+
+    OpenRouter answers HTTP 402 for this. Until now nothing in ``_call`` looked
+    at 402, so an empty wallet was retried twice per model, walked the whole
+    pool, and ended in "check your API key and network connection" - three
+    wrong directions for the one fix that works, which is adding credit.
+    Billing is counted per account, so this leaves the loop immediately.
+    """
+
+
 class OpenRouterClient:
 
     def __init__(self) -> None:
@@ -148,6 +160,17 @@ class OpenRouterClient:
                         f"[OpenRouter] Access denied for model {model} (HTTP 403)."
                     )
 
+                if resp.status_code == 402:
+                    # Say "billing" and quote the code: llm_client classifies an
+                    # exception by its text as well as its code, so this reaches
+                    # the user as CLOUD BLOCKED instead of a retry suggestion.
+                    detail = " ".join(str(getattr(resp, "text", "") or "").split())[:160]
+                    raise InsufficientCredits(
+                        "[OpenRouter] No billing credit left on this account "
+                        "(HTTP 402). The stored key is valid; top up at "
+                        f"https://openrouter.ai/settings/credits - {detail}"
+                    )
+
                 if resp.status_code == 429:
                     self._mark_rate_limited(model)
                     return None
@@ -173,6 +196,8 @@ class OpenRouterClient:
                 )
 
             except PermissionError:
+                raise
+            except InsufficientCredits:
                 raise
             except requests.exceptions.Timeout:
                 logger.warning(
@@ -213,6 +238,8 @@ class OpenRouterClient:
                 )
             except PermissionError:
                 raise
+            except InsufficientCredits:
+                raise
 
         for m in pool:
             if self._is_rate_limited(m):
@@ -225,12 +252,16 @@ class OpenRouterClient:
                     return result
             except PermissionError:
                 raise
+            except InsufficientCredits:
+                raise
             except Exception as e:
                 logger.warning(f"[OpenRouter] Failed on {m}: {e}")
 
         raise RuntimeError(
-            "[OpenRouter] All models failed or are rate-limited. "
-            "Check your API key and network connection."
+            f"[OpenRouter] None of the {len(pool)} configured models answered. "
+            "The reasons are in the lines above, and they are usually retired "
+            "':free' model names (HTTP 404/400) rather than a bad key: only an "
+            "HTTP 401 or 402 means the key or the account itself."
         )
 
     def chat(

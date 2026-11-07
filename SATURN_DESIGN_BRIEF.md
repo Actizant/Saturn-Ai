@@ -9,11 +9,11 @@
 
 Saturn is a **local-first AI desktop assistant** for Windows. It lives on the desktop as a floating, animated **orb**, listens through the mic, can see the screen and camera, remembers context, and takes action: chat, voice, a live vision HUD, smart-home control, service connections (Gmail / Instagram / Spotify / Discord / phone pairing), proactive reminders, self-repair, and a daily briefing.
 
-It is being **rebranded from "Brahma AI Evo" to "Saturn."** The engine and every feature already work — we are replacing *only* the interface.
+It carries a **new brand: "Saturn."** The engine and every feature already work — we are replacing *only* the interface.
 
 ### Fixed brand rules (non-negotiable)
 - ✅ Product name: **Saturn**. Maker tagline: **by Actizant**.
-- ❌ Never show the old brand: "Brahma", "Evo", "AI-EVO", the Devanagari "ब्रह्मा", or the legacy cyan accent.
+- ❌ Never show any pre-Saturn naming: "Evo", "AI-EVO", the Devanagari "ब्रह्मा", or the legacy cyan accent.
 - The **orb is the hero** and must remain the centrepiece (its *style* is open — see §4).
 
 ### Open to you

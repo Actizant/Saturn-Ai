@@ -2368,6 +2368,25 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "job_portal",
+        "description": "Discovers open roles on an employer's own public applicant-tracking board. It asks the board for its list of postings and reports the titles, locations, links and a stable key for each -- nothing more. Only Greenhouse and Lever boards are advertised, because those are the keyless public endpoints Saturn has shown the robots consent gate permit; any other board is refused by name, never guessed. The request always runs under the consent gate, so a policy that declines the path stops the fetch and says so. job_portal lists roles and can track one in Saturn's own local notes; it does not read a posting's full text, draft or tailor material, or submit an application. Run job_posting_guard over any posting text before reasoning about it.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING", "description": "search | portals | track"},
+                "portal": {"type": "STRING", "description": "With search: the board, 'greenhouse' or 'lever'. Ask action:'portals' for the list."},
+                "company": {"type": "STRING", "description": "With search: the company's board token, the slug in its careers URL (e.g. the part after boards/ or postings/). With track: the company of the role to record."},
+                "query": {"type": "STRING", "description": "With search: optional keyword the title or location must contain."},
+                "location": {"type": "STRING", "description": "With search: optional location the posting must mention."},
+                "limit": {"type": "NUMBER", "description": "With search: at most how many postings to list. Defaults to 15."},
+                "mode": {"type": "STRING", "description": "With track: 'record' to save a role locally (needs company and title) or 'list' to see what is already tracked. Defaults to record when a company and title are given, else list."},
+                "title": {"type": "STRING", "description": "With track mode:'record': the role's title, taken from a search result."},
+                "link": {"type": "STRING", "description": "With track mode:'record': optional posting URL. Tracking writes a local note only; it never applies."}
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "call_screening",
         "description": "Screens an incoming call with Saturn as an AI attendant. Answering always waits for the user to confirm on the Echo HUD.",
         "parameters": {
@@ -5905,6 +5924,14 @@ class SaturnLive:
                 from actions.job_posting_guard import job_posting_guard as guard_tool
                 result = await loop.run_in_executor(
                     None, lambda: guard_tool(parameters=args, player=self.ui)
+                )
+            elif name == "job_portal":
+                # Discovery reaches the network through the consent-gated ingress
+                # (a curl subprocess per request), so it runs off the voice loop
+                # rather than blocking it on a board's latency.
+                from actions.job_portal import job_portal as portal_tool
+                result = await loop.run_in_executor(
+                    None, lambda: portal_tool(parameters=args, player=self.ui)
                 )
             elif name == "call_screening":
                 action = (args.get("action") or "start").lower().strip()

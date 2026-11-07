@@ -1,5 +1,5 @@
 from core.user_paths import get_user_data_dir
-from core.gemini_models import generate as gemini_generate
+from core.gemini_models import billing_blocked, generate as gemini_generate
 import json
 import logging
 import re
@@ -12,6 +12,12 @@ from or_client import client as openrouter_client
 logger = logging.getLogger("llm_client")
 
 API_KEYS_PATH_NAME = "api_keys.json"
+
+#: The one wording for "this account cannot answer, on any model". Short on
+#: purpose: every surface that shows it has a different width budget, and the
+#: full provider text lands in the log line that ``_note()`` writes alongside.
+_BILLING_REASON = ("No billing credit left on the provider account, so every "
+                   "model on it is refused.")
 
 
 def _key_phrase(text: str) -> str:
@@ -144,13 +150,20 @@ class UnifiedAIClient:
             code = int(code)
         except (TypeError, ValueError):
             code = None
+        # An empty wallet is neither a throttle nor a permission problem, and
+        # it is not counted per model, so it is tested before the quota branch
+        # below can turn it into advice to wait. On 2026-11-06 this key returned
+        # HTTP 402 carrying the status word RESOURCE_EXHAUSTED, which the quota
+        # branch read as "rate limited" - the same misfiling main.py already
+        # documents for the 403 spelling of an unpaid account.
+        if billing_blocked(exc):
+            return "blocked", _BILLING_REASON
         if code == 403 or "permission_denied" in low:
-            if "balance" in low or "billing" in low:
-                # Short on purpose: every surface that shows this has a different
-                # width budget, and the full provider text is in the log line that
-                # _note() writes alongside it.
-                return "blocked", ("Unpaid billing balance on the provider "
-                                   "account, so every model is refused.")
+            if "balance" in low:
+                # Kept for a 403 that only says the balance is the problem; the
+                # predicate above deliberately ignores bare "balance", because a
+                # load balancer in a connection error is not a money problem.
+                return "blocked", _BILLING_REASON
             return "forbidden", f"The provider refused this request: {phrase or text}"
         if code == 401 or "unauthenticated" in low or "invalid api key" in low:
             return "bad_key", f"The provider rejected the stored key: {phrase or text}"

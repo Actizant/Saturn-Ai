@@ -1,9 +1,9 @@
-# Saturn (Brahma-Ai-Evo) — Local Security Scan Report
+# Saturn — Local Security Scan Report
 
 > **Scope:** Static review of the repository at commit-time working tree.
 > **Method:** Manual code review + pattern search (no cloud upload, no external scan engine, no Credits consumed).
 > **Date:** 2026-11-06
-> **Repo root:** `d:\Brahma-Ai-Evo-main (1)\Brahma-Ai-Evo-main`
+> **Repo root:** the repository working tree at scan time (local absolute path omitted)
 
 This is a **self-evolving desktop AI agent** (Python + PyQt6). Its entry points are
 `main.py` (~349 KB), `ui.py` (~1.3 MB), `discord_bot.py`, and `llm_client.py`. The

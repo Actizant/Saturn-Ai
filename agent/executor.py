@@ -228,6 +228,10 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None, player: Any 
         from actions.job_posting_guard import job_posting_guard
         return job_posting_guard(parameters=parameters, player=player) or "Done."
 
+    elif tool == "job_portal":
+        from actions.job_portal import job_portal
+        return job_portal(parameters=parameters, player=player) or "Done."
+
     elif tool == "game_updater":
         from actions.game_updater import game_updater
         return game_updater(parameters=parameters, player=player, speak=speak) or "Done."

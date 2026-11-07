@@ -102,19 +102,50 @@ def model_missing(exc: BaseException) -> bool:
     )
 
 
+def billing_blocked(exc: BaseException) -> bool:
+    """True when the account is out of money, as opposed to merely busy.
+
+    Google says this in two spellings: an HTTP 403 that mentions billing, and -
+    measured live on 2026-11-06 against the owner's key - HTTP 402 whose status
+    word is ``RESOURCE_EXHAUSTED``, the very word a per-model throttle uses.
+    The second spelling is the dangerous one: read as a rate limit it turns
+    into advice to wait, and waiting is the only thing that cannot help. It
+    also answers on this key identically for every model name, because billing
+    is counted per account and not per model.
+
+    Bare "balance" is deliberately not a trigger: a connection error routed
+    through a load balancer would otherwise be reported as a money problem.
+    """
+    text = str(exc).lower()
+    return (
+        getattr(exc, "code", None) == 402
+        or "payment required" in text
+        or "prepayment credit" in text
+        or "credits are depleted" in text
+        or "not have enough credit" in text
+        or "insufficient balance" in text
+        or "billing" in text
+        or "unpaid" in text
+    )
+
+
 def should_climb(exc: BaseException) -> bool:
     """Whether the next rung of the ladder could plausibly answer this.
 
     Two failures are per-model and worth moving past: a name Google has
     withdrawn, and a rate limit. Free-tier quota is counted per model (20
     requests a day on the top rung, measured 2026-10-30), so a sibling rung
-    still has its own budget. An auth problem or a malformed request fails
-    identically on every model, so burning three calls on it helps nobody.
+    still has its own budget. An auth problem, an empty wallet or a malformed
+    request fails identically on every model, so burning three calls on it
+    helps nobody - and on 2026-11-06 the empty wallet was burning three,
+    because its status word was borrowed from the throttle below.
     """
     code = getattr(exc, "code", None)
     text = str(exc).lower()
 
     if code in (401, 403) or "unauthenticated" in text or "permission_denied" in text:
+        return False
+    if billing_blocked(exc):
         return False
     if model_missing(exc):
         return True

@@ -291,6 +291,76 @@ def test_a_throttled_rung_moves_to_the_sibling_with_budget():
     assert client.models.calls == [gemini_models.FLASH[0], gemini_models.FLASH[1]]
 
 
+# ── An empty wallet is not a throttle ─────────────────────────────────────
+
+#: Verbatim shape of what this key actually answered on 2026-11-06.
+WALLET = ("402 RESOURCE_EXHAUSTED. {'error': {'code': 402, 'message': 'Your "
+          "prepayment credits are depleted. Please go to AI Studio at https://"
+          "ai.studio/projects to manage your project and billing.', 'status': "
+          "'RESOURCE_EXHAUSTED'}}")
+
+
+class _NoCredit(Exception):
+    code = 402
+    status = "RESOURCE_EXHAUSTED"
+
+
+def test_an_empty_wallet_is_asked_once_and_not_down_the_ladder():
+    """Billing is counted per account, so a sibling model is not a workaround.
+
+    Google spells an empty wallet with the status word of a throttle
+    (RESOURCE_EXHAUSTED), and the climb rule read that word as "try the next
+    name" -- so on 2026-11-06 one request burned three 402s, and the day's
+    quota logic looked fine while the account could not answer at all.
+    """
+    from core.gemini_models import generate
+
+    class _Dead(_Models):
+        def generate_content(self, model, contents, config=None):
+            self.calls.append(model)
+            raise _NoCredit(WALLET)
+
+    client = _Client()
+    client.models = _Dead(set())
+
+    with pytest.raises(_NoCredit):
+        generate(client, "hi")
+
+    assert len(client.models.calls) == 1, client.models.calls
+
+
+def test_the_wallet_is_recognised_from_its_code_or_its_words():
+    """Either tell is enough; the SDK has been seen to send only one of them."""
+    assert gemini_models.billing_blocked(_NoCredit(WALLET))
+    assert gemini_models.billing_blocked(RuntimeError("Payment Required: add funds"))
+    assert not gemini_models.billing_blocked(RuntimeError("401 UNAUTHENTICATED: key not valid"))
+
+
+def test_a_load_balancer_in_a_network_error_is_not_reported_as_money():
+    """The word 'balance' is not a billing tell, and matching it was tempting.
+
+    A connection error routed through a load balancer would otherwise be shown
+    to the user as an account problem, sending them to the billing page when
+    the internet is what is broken.
+    """
+    exc = RuntimeError("500 INTERNAL: the load balancer dropped the connection")
+
+    assert not gemini_models.billing_blocked(exc)
+
+
+def test_a_plain_throttle_still_climbs_after_the_wallet_fix():
+    """The correction must not have swallowed the behaviour it shares a word with.
+
+    RESOURCE_EXHAUSTED with no money tell in it is the per-model quota, and the
+    app must still move to the rung that has budget.
+    """
+    throttled = RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded for model")
+
+    assert not gemini_models.billing_blocked(throttled)
+    assert gemini_models.should_climb(throttled)
+    assert not gemini_models.should_climb(_NoCredit(WALLET))
+
+
 def test_generate_is_the_same_climb_for_callers_that_loop_nothing():
     from core.gemini_models import generate
 

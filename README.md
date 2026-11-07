@@ -122,7 +122,7 @@ Saturn-Ai/
 ├── features/               # tools Saturn has grown itself
 ├── skills/                 # loadable skill packs
 ├── smart_home/             # device providers + discovery
-└── brahma-connect-android/ # the phone companion
+└── saturn-connect-android/ # the phone companion
 ```
 
 ---

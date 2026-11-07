@@ -25,6 +25,10 @@ def _git_grep(pattern: str) -> str:
     return subprocess.run(
         ["git", "grep", "-n", "-I", "-i", "-E", pattern, "--", ":(exclude)*.jsonl"],
         capture_output=True, text=True,
+        # git emits raw bytes; decode them as UTF-8 with a lossy fallback rather
+        # than the locale code page, whose strict decoder dies on any byte it
+        # cannot map (e.g. 0x9d, undefined in cp1252) and returns stdout=None.
+        encoding="utf-8", errors="replace",
     ).stdout
 
 

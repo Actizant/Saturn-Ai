@@ -22,15 +22,17 @@ from typing import Any, Dict, Optional
 
 # The verbs this surface actually answers. Anything else is refused by name,
 # with the name echoed back, so a caller learns what is missing instead of
-# getting a vague failure. "search", "draft", "apply" and "track" belong to
-# later phases of the job-search workflow and are deliberately not claimed here.
+# getting a vague failure. "search" and "track" belong to job_portal and are
+# redirected there; "draft" and "apply" are later phases no tool honours yet.
 VERBS = ("check", "categories")
 
 _FUTURE_VERBS = {
-    "search": "searching job portals",
     "draft": "drafting a CV or cover letter",
     "apply": "submitting an application",
-    "track": "tracking applications",
+}
+_REDIR_VERBS = {
+    "search": "job_portal",
+    "track": "job_portal",
 }
 
 
@@ -39,6 +41,12 @@ def _clean(value: Any) -> str:
 
 
 def _refuse(action: str) -> str:
+    if action in _REDIR_VERBS:
+        return (
+            f"'{action}' is not what job_posting_guard does - that is the "
+            f"'{_REDIR_VERBS[action]}' tool, Saturn's job-board discovery and "
+            f"tracking surface. job_posting_guard answers to: {', '.join(VERBS)}."
+        )
     if action in _FUTURE_VERBS:
         return (
             f"job_posting_guard does not do {_FUTURE_VERBS[action]} yet - that is a later "

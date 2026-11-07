@@ -30,7 +30,7 @@ import types
 from pathlib import Path
 
 # The canvas has to be paintable without a display, so default to offscreen
-# unless the operator asked to watch it: set BRAHMA_STUDIO_LIVE=1 to see the
+# unless the operator asked to watch it: set SATURN_STUDIO_LIVE=1 to see the
 # window and drop a real screenshot.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -108,7 +108,7 @@ def main() -> int:
 
     def report() -> None:
         probe()
-        if os.environ.get("BRAHMA_STUDIO_LIVE") == "1":
+        if os.environ.get("SATURN_STUDIO_LIVE") == "1":
             shot = Path(tempfile.gettempdir()) / "saturn_studio_live.png"
             try:
                 window.grab().save(str(shot))

@@ -7051,7 +7051,7 @@ class MemoryInspectorPage(QWidget):
         import json
         from memory.memory_manager import all_entries_for_ui
         rows = all_entries_for_ui()
-        suggested = str(Path.home() / "brahma_memories.json")
+        suggested = str(Path.home() / "saturn_memories.json")
         path, _ = QFileDialog.getSaveFileName(self, "Export memories",
                                               suggested, "JSON (*.json)")
         if not path:
@@ -14497,7 +14497,7 @@ QPushButton[role="round"]:checked { border-color: %(ac)s; color: %(a2)s; }
         top = QHBoxLayout()
         mark = QLabel("SATURN")
         mark.setObjectName("brand")
-        f = QFont("Segoe UI", 26, QFont.Weight.DemiBold)
+        f = QFont(C.F_DISPLAY, 26, QFont.Weight.DemiBold)
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 8)
         mark.setFont(f)
         mark.setStyleSheet(f"color:{C.TEXT};")
@@ -14643,7 +14643,7 @@ QPushButton[role="round"]:checked { border-color: %(ac)s; color: %(a2)s; }
         lay.setSpacing(10)
         ttl = QLabel("ALL SET")
         ttl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ft = QFont("Segoe UI", 24, QFont.Weight.DemiBold)
+        ft = QFont(C.F_DISPLAY, 24, QFont.Weight.DemiBold)
         ft.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 10)
         ttl.setFont(ft)
         ttl.setStyleSheet(f"color:{C.GOLD_LT};")

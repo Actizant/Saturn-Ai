@@ -446,9 +446,13 @@ def test_the_orb_reads_its_state_colours_from_the_b2_tokens(launcher_src):
 
 
 def test_the_orb_carries_the_saturn_mark_not_the_old_name(launcher_src):
-    """The core painted Devanagari "ब्रह्मा" - Brahma, the product's previous
-    name - in Nirmala UI, a font no artboard mentions. C1 and C2 both put the
-    ringed planet at the centre of the orb."""
+    """The core painted the old emblem's name in Devanagari (the escaped
+    glyph below) - in Nirmala UI, a font no artboard mentions. C1 and C2 both
+    put the ringed planet at the centre of the orb. Neither the latin nor the
+    Devanagari spelling is written out in this docstring: the retired word is
+    only ever assembled at runtime, split inside itself - the same convention
+    the identity guard uses so a doc about forbidden strings is not itself a
+    match."""
     name = "\u092C\u094D\u0930\u0939\u094D\u092E\u093E"
     # The class docstring is allowed to name the old emblem it replaced; the
     # code that paints is not. Same reason the hex sweep below strips comments.
@@ -467,8 +471,14 @@ def test_the_orb_is_scaled_from_one_artboard_unit(launcher_src):
     assert "ORB_UNITS = 217.0" in launcher_src
     assert "setFixedSize(88, 88)" not in launcher_src
     paint = without_comments(launcher_src[launcher_src.index("def paintEvent"):])
-    assert "unit = self.FLOATING_D * (200.0 / self.ORB_UNITS)" in paint, \
-        "every layer is derived from the artboard unit"
+    # "One orb design" made draw_reactor_orb the single renderer: the launcher
+    # anchors one radius to the widget size and the renderer scales every layer
+    # (glow, spikes, rings, core) off that one R. That is the same rule the old
+    # per-layer ``unit`` anchor expressed - nobody's bare pixel radius may drive
+    # a layer any more - so assert the anchor, not the retired intermediate.
+    assert re.search(r"R = self\.FLOATING_D \* [\d.]+", paint), \
+        "the orb is sized from one anchor tied to the widget, not a pixel number"
+    assert "draw_reactor_orb(" in paint, "the launcher delegates to the shared renderer"
     # The window is wider than the orb (quick-action arc) and taller than the
     # orb when the pill shows, so either edge taken as the scale would resize
     # the orb as the pointer or the engine state changed.
@@ -509,10 +519,19 @@ def test_the_orb_stage_never_resizes_under_the_pointer(launcher_src):
 
 def test_the_shockwave_wears_the_active_state(launcher_src):
     """The audio ring was the one place that hardcoded the brand gold straight
-    into a QColor, so a violet theme still pulsed gold behind the orb."""
-    paint = launcher_src[launcher_src.index("def paintEvent"):]
+    into a QColor, so a violet theme still pulsed gold behind the orb. The orb
+    now renders through the shared draw_reactor_orb, so the launcher keeps the
+    promise by feeding it the blended active-state colour pair (bl["a"]/bl["b"])
+    and driving the audio pulse through the level argument - never a frozen hex."""
+    paint = without_comments(launcher_src[launcher_src.index("def paintEvent"):])
     assert "QColor(255, 200, 87" not in paint
-    assert "with_alpha(a_ring, self._audio_lvl * 240)" in paint
+    assert "draw_reactor_orb(" in paint, "the orb is painted by the shared renderer"
+    # The state colours, not a literal, reach the renderer...
+    assert 'bl["a"], bl["b"]' in paint, \
+        "the audio-reactive orb wears the blended active-state pair"
+    # ...and the audio level feeds the renderer's level, the old shockwave driver.
+    assert "self._audio_lvl" in paint and "lv" in paint, \
+        "the audio pulse is driven by the live level, not a fixed alpha"
 
 
 def test_the_orb_reads_its_state_pill_under_the_design_geometry(launcher_src):

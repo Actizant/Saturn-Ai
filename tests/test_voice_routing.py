@@ -238,12 +238,16 @@ def test_no_voice_route_keys_off_the_socket_alone():
 
 
 def test_proactive_nudge_uses_the_speech_funnel():
-    """It used to be injected into the Live socket, so Local mode never heard it."""
+    """The check-in line is spoken through self.speak, never injected into the
+    Live socket (which Local mode could not hear), and the raw instruction
+    prompt is never read aloud -- only the brain's derived line is."""
     source = inspect.getsource(SaturnLive)
     start = source.index("engine.build_prompt(memory={})")
-    window = source[start:start + 700]
+    end = source.index("self._reset_idle_activity()", start)
+    window = source[start:end]
 
-    assert "self.speak(prompt" in window
+    assert "self.speak(line" in window
+    assert "self.speak(prompt" not in window  # the instruction sheet is data, not speech
     assert "send_client_content" not in window
 
 
